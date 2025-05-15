@@ -14,18 +14,21 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    bot = Bot(token=os.getenv("BOT_TOKEN"))
-    dp = Dispatcher()
-    dp.include_router(router)
-    await bot.delete_webhook(drop_pending_updates=True)
-    notification_task = asyncio.create_task(notify_users(bot))
-    try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        logging.error(f"Ошибка: {e}")
-    finally:
-        notification_task.cancel()
-        await bot.session.close()
+    async with Bot(token=os.getenv("BOT_TOKEN")) as bot:
+        dp = Dispatcher()
+        dp.include_router(router)
+        await bot.delete_webhook(drop_pending_updates=True)
+        notification_task = asyncio.create_task(notify_users(bot))
+        try:
+            await dp.start_polling(bot)
+        except Exception as e:
+            logging.error(f"Ошибка: {e}")
+        finally:
+            notification_task.cancel()
+            try:
+                await notification_task
+            except asyncio.CancelledError:
+                logger.info("Задача рассылки отменена")
 
 if __name__ == "__main__":
     logger.info("Бот включен")

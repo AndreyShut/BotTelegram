@@ -125,3 +125,24 @@ async def main_menu(message: Message, state: FSMContext):
         await message.answer("Меню администратора.\n(Здесь добавьте свои команды админа.)", reply_markup=kb.main)
     else:
         await message.answer("Вы в главном меню.", reply_markup=kb.main)
+
+
+@router.message(F.text == "Новости")
+async def show_news(message: Message):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT title, description, date, place FROM news ORDER BY date DESC")
+    all_news = cur.fetchall()
+    conn.close()
+    if not all_news:
+        await message.answer("Новостей пока нет.")
+        return
+
+    text = ""
+    for news in all_news:
+        title, description, date, place = news
+        text += f"<b>{title}</b>\n{description or ''}\nДата: {date}"
+        if place:
+            text += f"\nМесто: {place}"
+        text += "\n\n"
+    await message.answer(text.strip(), parse_mode="HTML")

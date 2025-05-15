@@ -13,18 +13,21 @@ async def notify_users(bot: Bot):
                     news_list = await cursor.fetchall()
 
                 if news_list:
-                    async with db.execute('SELECT user_id FROM users') as cursor:
-                        users = await cursor.fetchall()
+                    async with db.execute('SELECT id_student FROM students') as cursor:
+                        students = await cursor.fetchall()
 
                     for news_id, title, description in news_list:
                         if news_id in sent_news:
                             continue # Эта новость уже рассылалась
-                        for (user_id,) in users:
+                        for (id_student,) in students:
                             try:
-                                await bot.send_message(user_id, f'<b>Новость:</b> {title}\n{description}')
+                                await bot.send_message(id_student, f'Новость: {title}\n{description}')
                             except Exception: pass
                         sent_news.add(news_id)
             await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            print("Notify task cancelled, cleanup if needed")
+            raise
         except Exception as e:
             print(f"Ошибка: {e}")
             await asyncio.sleep(60)
