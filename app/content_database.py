@@ -1,30 +1,48 @@
 import sqlite3
 
 def populate_database():
-    connection = sqlite3.connect('student_bot.db')
-    cursor = connection.cursor()
+    conn = sqlite3.connect('student_bot.db')
+    cur = conn.cursor()
 
-    try:
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, login, password) VALUES (?, ?, ?)", (1, 'student1', 'password1'))
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, login, password) VALUES (?, ?, ?)", (2, 'student2', 'password2'))
+    # Пример групп
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (1, '21ВВС1'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '21ВА1'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '22ВВС1'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '22ВА1'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '23ВВ4'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '23ВА1'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '24ВВВ4'))
+    cur.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (2, '24ВА1'))
 
-        cursor.execute('INSERT INTO schedule (user_id, date, subject) VALUES (?, ?, ?)', (1, '2024-04-01', 'Математика'))
-        cursor.execute('INSERT INTO schedule (user_id, date, subject) VALUES (?, ?, ?)', (1, '2024-04-01', 'Физика'))
-        cursor.execute('INSERT INTO schedule (user_id, date, subject) VALUES (?, ?, ?)', (2, '2024-04-02', 'Химия'))
+    # Пример пользователей
+    cur.execute("INSERT OR IGNORE INTO users (user_id, login, password, group_id) VALUES (?, ?, ?, ?)", (123456, "Andrey", "passwd1", 1))
+    cur.execute("INSERT OR IGNORE INTO users (user_id, login, password, group_id) VALUES (?, ?, ?, ?)", (123457, "Vadim", "passwd2", 1))
 
-        cursor.execute('INSERT INTO debts (user_id, subject, amount) VALUES (?, ?, ?)', (1, 'Алгебра', 1500.0))
-        cursor.execute('INSERT INTO debts (user_id, subject, amount) VALUES (?, ?, ?)', (2, 'Геометрия', 500.0))
+    # Пример расписания
+    cur.execute("INSERT INTO schedule (group_id, date, start_time, end_time, subject, lecturer, classroom) VALUES (?, ?, ?, ?, ?, ?, ?)", (1, "2025-05-12", "08:00", "9:30", "Информационные технологии", "Бождай А.С.", "7a-203"))
+    cur.execute("INSERT INTO schedule (group_id, date, start_time, end_time, subject, lecturer, classroom) VALUES (?, ?, ?, ?, ?, ?, ?)", (1, "2025-05-18", "09:50", "11:20", "Качество и тестирование ПО", "Эпп В.В.", "7a-203"))
 
-        cursor.execute('INSERT INTO news (title, description, date) VALUES (?, ?, ?)',
-                       ('Новая олимпиада', 'Открыта регистрация на олимпиаду.', '2024-04-01'))
+    # Пример новости
+    cur.execute("INSERT INTO news (title, description, date, place) VALUES (?, ?, ?, ?)",
+                ("Новости образования", "Абилимпикс в ПГУ", "2025-04-21", "7а-203"))
 
-        cursor.execute('INSERT INTO tests (user_id, test_description, date) VALUES (?, ?, ?)',
-                       (1, 'Тест по математике', '2024-04-02'))
+    # Пример событий
+    cur.execute("INSERT INTO events (title, description, date, place, group_id) VALUES (?, ?, ?, ?, ?)",
+                ("Ярмарка вакансий", "Встреча с работодателями", "2025-04-03", "8 Корпус", None))
+    cur.execute("INSERT INTO events (title, description, date, place, group_id) VALUES (?, ?, ?, ?, ?)",
+                ("Собрание группы", "Практика", "2025-05-21", "7а-203", 1))
 
-        connection.commit()
-    except Exception as e:
-        print(f'Error: {e}')
-    finally:
-        connection.close()
+    # Пример задолженности
+    cur.execute("INSERT INTO debts (user_id, subject, amount) VALUES (?, ?, ?)", (123456, "Технология больших данные", 1))
+    cur.execute("INSERT INTO debts (user_id, subject, amount) VALUES (?, ?, ?)", (123457, "Математика", 1))
+
+    # Пример тестов
+    cur.execute("INSERT INTO tests (group_id, test_description, date, file_link) VALUES (?, ?, ?, ?)",
+                (1, "Тест Геометрическому моделированию в АП", "2025-04-07", "ссылка на тест"))
+    cur.execute("INSERT INTO tests (group_id, test_description, date, file_link) VALUES (?, ?, ?, ?)",
+                (2, "Тест Качество и тестирование ПО", "2024-04-08", "ссылка"))
+
+    conn.commit()
+    conn.close()
 
 populate_database()
