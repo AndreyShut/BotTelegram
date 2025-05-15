@@ -1,84 +1,127 @@
-from aiogram import Router
-from aiogram.types import Message, CallbackQuery
+from aiogram import Router, F
+from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 import logging
+import sqlite3
 
 import app.keyboards as kb
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-class Register(StatesGroup):
-    login = State()
-    password = State()
+DB_PATH = "student_bot.db"
+
+class AuthStates(StatesGroup):
+    waiting_for_login = State()
+    waiting_for_password = State()
+    authorized = State()
+
+def get_student_by_login(login):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id_student, login, password, telegram_id FROM students WHERE login = ?", (login,))
+    result = cur.fetchone()
+    conn.close()
+    return result
+
+def update_telegram_for_student(id_student, telegram_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    # Проверяем, что этот телеграм нигде больше не привязан
+    cur.execute("UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", (telegram_id,))
+    cur.execute("UPDATE students SET telegram_id = ? WHERE id_student = ?", (telegram_id, id_student))
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected > 0
+
+def get_student_by_telegram(telegram_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id_student, login FROM students WHERE telegram_id = ?", (telegram_id,))
+    result = cur.fetchone()
+    conn.close()
+    return result
+
+def remove_telegram_binding(telegram_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected > 0
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    logger.info(f"User {message.from_user.id} started the bot")
-    await message.answer('Добро пожаловать!', reply_markup=kb.main)
+async def start(message: Message, state: FSMContext):
+    # сначала проверим, привязан ли уже Telegram к записи
+    if get_student_by_telegram(message.from_user.id):
+        await message.answer("Вы уже привязаны к своему профилю. Для отвязки используйте /unbind")
+        return
+    await message.answer("Добро пожаловать! Введите ваш логин:")
+    await state.set_state(AuthStates.waiting_for_login)
 
-@router.message(Command('help'))
-async def cmd_help(message: Message):
-    await message.answer(
-        "Доступные команды:\n"
-        "/start - Начать работу\n"
-        "/help - Справка\n"
-        "/register - Регистрация"
-    )
-
-@router.message(Command('register'))
-async def register(message: Message, state: FSMContext):
-    await state.set_state(Register.login)
-    await message.answer('Введите ваш логин:')
-
-@router.message(Register.login)
-async def register_login(message: Message, state: FSMContext):
+@router.message(AuthStates.waiting_for_login)
+async def process_login(message: Message, state: FSMContext):
     login = message.text.strip()
-    if len(login) < 4:
-        await message.answer("Логин слишком короткий!")
-        return
     await state.update_data(login=login)
-    await state.set_state(Register.password)
-    await message.answer("Введите ваш пароль:")
+    await message.answer('Введите ваш пароль:')
+    await state.set_state(AuthStates.waiting_for_password)
 
-@router.message(Register.password)
-async def register_password(message: Message, state: FSMContext):
+@router.message(AuthStates.waiting_for_password)
+async def process_password(message: Message, state: FSMContext):
     password = message.text.strip()
-    if len(password) < 6:
-        await message.answer("Пароль слишком короткий!")
-        return
     data = await state.get_data()
-    import aiosqlite
-    # Сохраняем пользователя в БД
-    async with aiosqlite.connect('student_bot.db') as db:
-        await db.execute(
-            'INSERT OR IGNORE INTO users (user_id, login, password) VALUES (?, ?, ?)',
-            (message.from_user.id, data["login"], password)
-        )
-        await db.commit()
-    await message.answer(
-        f'Регистрация успешна!\n'
-        f'Логин: {data["login"]}\n'
-        f'Пароль: {"*" * len(password)}'
-    )
+    login = data.get("login")
+
+    # обработка режима администратора
+    if login == 'admin' and password == 'admin':
+        await message.answer("Добро пожаловать, администратор!", reply_markup=kb.main)
+        await state.set_state(AuthStates.authorized)
+        await state.update_data(is_admin=True)
+        return
+
+    student = get_student_by_login(login)
+    if student and str(student[2]) == password:
+        # Если уже привязан к другой учётке — запретить
+        if get_student_by_telegram(message.from_user.id):
+            await message.answer('Вы уже привязаны к профилю. Для отвязки используйте /unbind')
+            await state.clear()
+            return
+        updated = update_telegram_for_student(student[0], message.from_user.id)
+        if updated:
+            await message.answer('Вы успешно авторизованы и привязаны к своей записи.', reply_markup=kb.main)
+            await state.set_state(AuthStates.authorized)
+            await state.update_data(is_admin=False)
+        else:
+            await message.answer('Ошибка привязки. Повторите попытку.')
+            await state.set_state(AuthStates.waiting_for_login)
+    else:
+        await message.answer('Неверный логин или пароль. Попробуйте снова.\nЛогин:')
+        await state.set_state(AuthStates.waiting_for_login)
+
+@router.message(Command("unbind"))
+async def unbind(message: Message, state: FSMContext):
+    # только если реально был привязан
+    if remove_telegram_binding(message.from_user.id):
+        await message.answer("Ваш Telegram был отвязан. Для повторной регистрации используйте /start")
+        await state.clear()
+    else:
+        await message.answer("Ваш профиль не найден либо был уже отвязан.")
+
+@router.message(Command("logout"))
+async def logout(message: Message, state: FSMContext):
+    # выход из системы без отвязки Telegram
     await state.clear()
+    await message.answer("Вы вышли из сессии. Для повторного входа: /start")
 
-@router.message(lambda m: m.text == "Расписание")
-async def select_schedule(message: Message):
-    await message.answer('Выберите расписание', reply_markup=kb.select)
-
-@router.callback_query(lambda call: call.data in ("today", "tomorrow", "week"))
-async def schedule_handler(call: CallbackQuery):
-    await call.message.answer(f'Расписание на {call.data}...')
-
-@router.message(lambda m: m.text == "Задолженности")
-async def debts(message: Message):
-    # Здесь нужно реализовать получение задолженностей
-    await message.answer("Показать задолженности? Пока не реализовано.")
-
-@router.message(lambda m: m.text == "Новости")
-async def news(message: Message):
-    # Здесь нужно реализовать показ новостей из базы
-    await message.answer("Показать новости? Пока не реализовано.")
+# обработка остальных сообщений после авторизации
+@router.message(AuthStates.authorized, F.text)
+async def main_menu(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("is_admin"):
+        await message.answer("Меню администратора.\n(Здесь добавьте свои команды админа.)", reply_markup=kb.main)
+    else:
+        await message.answer("Вы в главном меню.", reply_markup=kb.main)
