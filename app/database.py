@@ -43,8 +43,8 @@ def create_database():
             news_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (news_id) REFERENCES news(id),
-            FOREIGN KEY (user_id) REFERENCES students(telegram_id)
+            FOREIGN KEY (news_id) REFERENCES news(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES students(telegram_id) ON DELETE CASCADE
         )
     ''')
  

@@ -21,7 +21,7 @@ async def shutdown(bot: Bot):
         await BotState.shutdown()
         await db.close()
         if bot:
-            await (await bot.get_session()).close()
+            await bot.session.close()
         logger.info("Бот успешно завершил работу")
     except Exception as e:
         logger.error(f"Ошибка при завершении работы: {e}")

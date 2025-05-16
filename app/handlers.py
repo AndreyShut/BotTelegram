@@ -74,18 +74,30 @@ async def get_student_by_telegram(telegram_id):
         return None
 
 async def remove_telegram_binding(telegram_id: int) -> bool:
-    """Отвязывает Telegram ID от студента"""
+    """Отвязывает Telegram ID от студента с обработкой зависимых записей"""
     try:
         async with db.get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "UPDATE students SET telegram_id = NULL WHERE telegram_id = ?",
-                    (telegram_id,)
-                )
-                await conn.commit()
-                return cur.rowcount > 0
+            await conn.execute("BEGIN")
+            
+            # 1. Удаляем зависимые записи из sent_notifications
+            await conn.execute(
+                "DELETE FROM sent_notifications WHERE user_id = ?",
+                (telegram_id,)
+            )
+            
+            # 2. Отвязываем Telegram ID
+            await conn.execute(
+                "UPDATE students SET telegram_id = NULL WHERE telegram_id = ?",
+                (telegram_id,)
+            )
+            
+            await conn.commit()
+            return True
+            
     except Exception as e:
         logger.error(f"Error in remove_telegram_binding: {e}")
+        if conn:
+            await conn.rollback()
         return False
 
 @router.message(CommandStart())
