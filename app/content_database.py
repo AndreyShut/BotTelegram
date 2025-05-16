@@ -33,6 +33,7 @@ def populate_database():
     cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (14,1,'a123464',pw_manager.encrypt('124114'), "Шутихин А.Э."))
 
 
+
     conn.commit()
     conn.close()
 

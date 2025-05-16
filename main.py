@@ -27,39 +27,50 @@ async def shutdown(bot: Bot):
         logger.error(f"Ошибка при завершении работы: {e}")
 
 async def main():
-    bot = Bot(token=os.getenv("BOT_TOKEN"))
-    dp = Dispatcher()
-    try:
-        await db.connect()
-        BotState.bot_instance = bot
-        dp.include_router(router)
+    max_restarts = 3
+    restart_delay = 30
+    for attempt in range(max_restarts):
+        bot = Bot(token=os.getenv("BOT_TOKEN"))
+        dp = Dispatcher()
+        try:
+            await db.connect()
+            BotState.bot_instance = bot
+            dp.include_router(router)
         
-        for attempt in range(3):
-            try:
-                await bot.delete_webhook(drop_pending_updates=True)
-                break
-            except TelegramNetworkError as e:
-                if attempt == 2:
-                    logger.error(f"Не удалось удалить webhook после {3} попыток: {e}")
-                    raise
-                logger.warning(f"Ошибка при удалении webhook (попытка {attempt + 1}): {e}")
-                await asyncio.sleep(5)
+            for webhook_attempt in range(3):
+                try:
+                    await bot.delete_webhook(drop_pending_updates=True)
+                    break
+                except TelegramNetworkError as e:
+                    if attempt == 2:
+                        logger.error(f"Не удалось удалить webhook после {3} попыток: {e}")
+                        raise
+                    logger.warning(f"Ошибка при удалении webhook (попытка {attempt + 1}): {e}")
+                    await asyncio.sleep(5)
 
-        BotState.notification_task = asyncio.create_task(notify_users(bot))
+            BotState.notification_task = asyncio.create_task(notify_users(bot))
 
         # Запускаем polling с обработкой ошибок сети
-        while True:
-            try:
-                await dp.start_polling(bot)
-                break  # Если polling завершился без ошибок
-            except TelegramNetworkError as e:
-                logger.error(f"Ошибка сети в polling: {e}")
-                await asyncio.sleep(10)  # Пауза перед повторной попыткой
+            while True:
+                try:
+                    await dp.start_polling(bot)
+                    break  # Если polling завершился без ошибок
+                except TelegramNetworkError as e:
+                    logger.error(f"Ошибка сети в polling: {e}")
+                    await asyncio.sleep(10)  # Пауза перед повторной попыткой
+                except Exception as e:
+                    logger.error(f"Неожиданная ошибка в polling: {e}")
+                    await asyncio.sleep(10)
+            break
 
-    except Exception as e:
-        logger.error(f"Критическая ошибка в main: {e}")
-    finally:
-        await shutdown(bot)
+        except Exception as e:
+            logger.critical(f"Критическая ошибка в main (попытка {attempt + 1}/{max_restarts}): {e}")
+            if attempt == max_restarts - 1:
+                raise  # Последняя попытка - пробрасываем исключение
+            await shutdown(bot)
+            logger.info(f"Повторный запуск через {restart_delay} секунд...")
+            await asyncio.sleep(restart_delay)
+    await  shutdown(bot)
             
 
 if __name__ == "__main__":
