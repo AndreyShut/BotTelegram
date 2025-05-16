@@ -4,60 +4,119 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 import logging
-import sqlite3
-
+import aiosqlite
+import asyncio
+import atexit
 import app.keyboards as kb
+from app.state import BotState
+
+db_connection = None
 
 router = Router()
 logger = logging.getLogger(__name__)
-
 DB_PATH = "student_bot.db"
+
 
 class AuthStates(StatesGroup):
     waiting_for_login = State()
     waiting_for_password = State()
     authorized = State()
 
-def get_student_by_login(login):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT id_student, login, password, telegram_id FROM students WHERE login = ?", (login,))
-    result = cur.fetchone()
-    conn.close()
-    return result
+async def init_db():
+    global db_connection
+    try:
+        if db_connection is None or (not db_connection._running and not db_connection._connection):
+            db_connection = await aiosqlite.connect(DB_PATH)
+            await db_connection.execute("PRAGMA journal_mode=WAL")
+            await db_connection.execute("PRAGMA synchronous=NORMAL")
+            await db_connection.execute("PRAGMA busy_timeout=30000")
+            await db_connection.execute("PRAGMA cache_size=-10000")
+            await db_connection.execute("PRAGMA foreign_keys=ON")
+            logger.info("Database connection initialized with WAL mode")
+        return db_connection
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        # Попробуем переподключиться через 5 секунд
+        await asyncio.sleep(5)
+        return await init_db()
 
-def update_telegram_for_student(id_student, telegram_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    # Проверяем, что этот телеграм нигде больше не привязан
-    cur.execute("UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", (telegram_id,))
-    cur.execute("UPDATE students SET telegram_id = ? WHERE id_student = ?", (telegram_id, id_student))
-    conn.commit()
-    affected = cur.rowcount
-    conn.close()
-    return affected > 0
+async def close_db():
+    global db_connection
+    if db_connection is not None:
+        await db_connection.close()
+        db_connection = None
+        logger.info("Database connection closed")
+atexit.register(lambda: asyncio.get_event_loop().run_until_complete(close_db()))
 
-def get_student_by_telegram(telegram_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT id_student, login FROM students WHERE telegram_id = ?", (telegram_id,))
-    result = cur.fetchone()
-    conn.close()
-    return result
 
-def remove_telegram_binding(telegram_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", (telegram_id,))
-    conn.commit()
-    affected = cur.rowcount
-    conn.close()
-    return affected > 0
+async def get_student_by_login(login):
+    db = await init_db()
+    try:
+        async with db.execute(
+            "SELECT id_student, login, password, telegram_id FROM students WHERE login = ?", 
+            (login,)
+        ) as cur:
+            return await cur.fetchone()
+    except aiosqlite.Error as e:
+        logger.error(f"Database error in get_student_by_login: {e}")
+        return None
+
+async def update_telegram_for_student(id_student, telegram_id):
+    db = await init_db()
+    try:
+        async with db:
+            # Сначала отвяжем Telegram у других пользователей
+            await db.execute(
+                "UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", 
+                (telegram_id,)
+            )
+            await db.execute(
+                "UPDATE students SET telegram_id = ? WHERE id_student = ?", 
+                (telegram_id, id_student)
+            )
+            await db.commit()
+            
+            # Проверяем обновление
+            async with db.execute(
+                "SELECT telegram_id FROM students WHERE id_student = ?", 
+                (id_student,)
+            ) as cur:
+                updated = await cur.fetchone()
+            return updated is not None and updated[0] == telegram_id
+    except aiosqlite.Error as e:
+        logger.error(f"Database error in update_telegram_for_student: {e}")
+        return False
+
+async def get_student_by_telegram(telegram_id):
+    db = await init_db()
+    try:
+        async with db.execute(
+            "SELECT id_student, login FROM students WHERE telegram_id = ?", 
+            (telegram_id,)
+        ) as cur:
+            return await cur.fetchone()
+    except aiosqlite.Error as e:
+        logger.error(f"Database error in get_student_by_telegram: {e}")
+        return None
+
+async def remove_telegram_binding(telegram_id):
+    db = await init_db()
+    try:
+        async with db:
+            cur = await db.execute(
+                "UPDATE students SET telegram_id = NULL WHERE telegram_id = ?", 
+                (telegram_id,)
+            )
+            await db.commit()
+            return cur.rowcount > 0
+    except aiosqlite.Error as e:
+        logger.error(f"Database error in remove_telegram_binding: {e}")
+        return False
 
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
-    # сначала проверим, привязан ли уже Telegram к записи
-    if get_student_by_telegram(message.from_user.id):
+    student = await get_student_by_telegram(message.from_user.id)
+    if student:
         await message.answer("Вы уже привязаны к своему профилю. Для отвязки используйте /unbind")
         return
     await message.answer("Добро пожаловать! Введите ваш логин:")
@@ -78,19 +137,20 @@ async def process_password(message: Message, state: FSMContext):
 
     # обработка режима администратора
     if login == 'admin' and password == 'admin':
-        await message.answer("Добро пожаловать, администратор!", reply_markup=kb.main)
+        await state.clear()
+        # Устанавливаем новое состояние
         await state.set_state(AuthStates.authorized)
         await state.update_data(is_admin=True)
+        await message.answer("Добро пожаловать, администратор!", reply_markup=kb.main)
         return
 
-    student = get_student_by_login(login)
+    student = await get_student_by_login(login)
     if student and str(student[2]) == password:
-        # Если уже привязан к другой учётке — запретить
-        if get_student_by_telegram(message.from_user.id):
+        if await get_student_by_telegram(message.from_user.id):
             await message.answer('Вы уже привязаны к профилю. Для отвязки используйте /unbind')
             await state.clear()
             return
-        updated = update_telegram_for_student(student[0], message.from_user.id)
+        updated = await update_telegram_for_student(student[0], message.from_user.id)
         if updated:
             await message.answer('Вы успешно авторизованы и привязаны к своей записи.', reply_markup=kb.main)
             await state.set_state(AuthStates.authorized)
@@ -104,8 +164,7 @@ async def process_password(message: Message, state: FSMContext):
 
 @router.message(Command("unbind"))
 async def unbind(message: Message, state: FSMContext):
-    # только если реально был привязан
-    if remove_telegram_binding(message.from_user.id):
+    if await remove_telegram_binding(message.from_user.id):
         await message.answer("Ваш Telegram был отвязан. Для повторной регистрации используйте /start")
         await state.clear()
     else:
@@ -113,11 +172,14 @@ async def unbind(message: Message, state: FSMContext):
 
 @router.message(Command("logout"))
 async def logout(message: Message, state: FSMContext):
-    # выход из системы без отвязки Telegram
-    await state.clear()
-    await message.answer("Вы вышли из сессии. Для повторного входа: /start")
+    try:
+        # Очищаем состояние
+        await state.clear()
+        
+        await message.answer("Вы успешно вышли. Для входа используйте /start")
+    except Exception as e:
+        logger.error(f"Ошибка выхода: {e}")
 
-# обработка остальных сообщений после авторизации
 @router.message(AuthStates.authorized, F.text)
 async def main_menu(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -126,14 +188,11 @@ async def main_menu(message: Message, state: FSMContext):
     else:
         await message.answer("Вы в главном меню.", reply_markup=kb.main)
 
-
 @router.message(F.text == "Новости")
 async def show_news(message: Message):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT title, description, date, place FROM news ORDER BY date DESC")
-    all_news = cur.fetchall()
-    conn.close()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT title, description, date, place FROM news ORDER BY date DESC") as cur:
+            all_news = await cur.fetchall()
     if not all_news:
         await message.answer("Новостей пока нет.")
         return

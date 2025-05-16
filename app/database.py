@@ -22,6 +22,7 @@ def create_database():
             password TEXT NOT NULL,
             description TEXT,
             telegram_id INTEGER UNIQUE,
+            is_active INTEGER DEFAULT 1,
             FOREIGN KEY (id_group) REFERENCES groups(id)
         )
     ''')
@@ -36,6 +37,17 @@ def create_database():
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sent_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (news_id) REFERENCES news(id),
+            FOREIGN KEY (user_id) REFERENCES students(telegram_id)
+        )
+    ''')
+ 
 
     connection.commit()
     connection.close()
