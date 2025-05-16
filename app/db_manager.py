@@ -2,11 +2,24 @@ import aiosqlite
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from app.security import PasswordManager
 
 logger = logging.getLogger(__name__)
 
 class Database:
     _instance = None
+    
+    async def encrypt_password(self, password: str) -> str:
+        """Шифрует пароль перед сохранением в БД"""
+        return PasswordManager().encrypt(password)
+    
+    async def verify_password(self, encrypted_password: str, input_password: str) -> bool:
+        """Проверяет соответствие пароля"""
+        try:
+            decrypted = PasswordManager().decrypt(encrypted_password)
+            return decrypted == input_password
+        except:
+            return False
     
     def __new__(cls):
         if cls._instance is None:
@@ -59,6 +72,8 @@ class Database:
                 logger.info("DB connection closed")
             except Exception as e:
                 logger.error(f"Error closing DB: {e}")
+
+
 
 # Глобальный экземпляр
 db = Database()

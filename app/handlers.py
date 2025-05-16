@@ -131,7 +131,7 @@ async def process_password(message: Message, state: FSMContext):
         return
 
     student = await get_student_by_login(login)
-    if student and str(student[2]) == password:
+    if student and await db.verify_password(str(student[2]), password):
         if await get_student_by_telegram(message.from_user.id):
             await message.answer('Вы уже привязаны к профилю. Для отвязки используйте /unbind')
             await state.clear()
