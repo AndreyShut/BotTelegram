@@ -1,6 +1,6 @@
 import sqlite3
 from security import PasswordManager
-
+from datetime import date, timedelta
 
 def populate_database():
     conn = sqlite3.connect('student_bot.db')
@@ -166,8 +166,65 @@ def populate_database():
     cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (132, 8, 'h00018', pw_manager.encrypt('70018'), 'Холиков Ф.Б.'))
     cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (133, 8, 'h00019', pw_manager.encrypt('70019'), 'Черкасов В.Е.'))
     cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (134, 8, 'h00020', pw_manager.encrypt('70020'), 'Ясянкин Н.А.'))
-        
-    
+
+
+
+ # Добавляем преподавателей
+    teachers = ['Иванов И.И.', 'Петров П.П.', 'Сидорова С.С.']
+    for teacher in teachers:
+        cur.execute("INSERT OR IGNORE INTO teachers (full_name) VALUES (?)", (teacher,))
+
+    # Добавляем предметы
+    subjects = ['Математика', 'Физика', 'Программирование']
+    for subject in subjects:
+        cur.execute("INSERT OR IGNORE INTO subjects (name) VALUES (?)", (subject,))
+
+    # Связываем преподавателей с предметами
+    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (1, 1)")
+    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (1, 2)")
+    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (2, 3)")
+    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (3, 1)")
+
+    # Добавляем тесты
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    cur.execute('''
+        INSERT OR IGNORE INTO tests 
+        (group_id, subject_id, teacher_id, test_link, date) 
+        VALUES (1, 1, 1, 'https://example.com/test1', ?)
+    ''', (tomorrow,))
+
+    # Добавляем расписание преподавателей
+    cur.execute('''
+        INSERT OR IGNORE INTO teacher_schedule 
+        (teacher_id, subject_id, day_of_week, start_time, end_time, is_even_week) 
+        VALUES (1, 1, 1, '09:00', '10:30', NULL)
+    ''')
+
+    # Добавляем график приема задолженностей
+    cur.execute('''
+        INSERT OR IGNORE INTO debt_schedule 
+        (teacher_id, subject_id, day_of_week, start_time, end_time, classroom) 
+        VALUES (1, 1, 3, '14:00', '16:00', 'Ауд. 101')
+    ''')
+
+    # Добавляем типы долгов
+    debt_types = ['Контрольная работа', 'Лабораторная работа', 'Экзамен']
+    for debt_type in debt_types:
+        cur.execute("INSERT OR IGNORE INTO debt_types (name) VALUES (?)", (debt_type,))
+
+
+    # Добавляем новости
+    cur.execute('''
+        INSERT OR IGNORE INTO news 
+        (title, description, date, for_all_groups, is_published) 
+        VALUES 
+        ('Общая новость', 'Эта новость для всех', datetime('now'), 1, 1),
+        ('Новость для группы 1', 'Только для группы 1', datetime('now'), 0, 1)
+    ''')
+
+    # Связываем новость с группой
+    cur.execute("INSERT OR IGNORE INTO news_groups VALUES (2, 1)")
+
     conn.commit()
     conn.close()
 
