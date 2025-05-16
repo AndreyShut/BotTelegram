@@ -51,5 +51,8 @@ def create_database():
 
     connection.commit()
     connection.close()
-create_database()
+    
+if __name__ == "__main__":
+    create_database()  # Теперь скрипт нужно запускать вручную
+
 

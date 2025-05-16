@@ -33,4 +33,5 @@ def populate_database():
     conn.commit()
     conn.close()
 
-populate_database()
+if __name__ == "__main__":
+    populate_database()  # Теперь скрипт нужно запускать вручную
