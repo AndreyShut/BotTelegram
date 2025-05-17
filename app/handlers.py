@@ -191,7 +191,51 @@ async def main_menu(message: Message, state: FSMContext):
         await message.answer("Вы в главном меню.", reply_markup=kb.main)
 
 
+@router.message(F.text == "📰 Новости")
+async def show_news(message: Message):
+    try:
+        # Получаем студента
+        student = await get_student_by_telegram(message.from_user.id)
+        if not student:
+            await message.answer("Сначала авторизуйтесь с помощью /start")
+            return
 
+        async with db.get_connection() as conn:
+            # Получаем новости для студента (все или только для его группы)
+            async with conn.execute('''
+                SELECT n.id, n.title, n.description, n.date, n.place 
+                FROM news n
+                LEFT JOIN news_groups ng ON n.id = ng.news_id
+                WHERE n.is_published = 1
+                AND (n.for_all_groups = 1 OR ng.group_id = (
+                    SELECT id_group FROM students WHERE id_student = ?
+                ))
+                ORDER BY n.date DESC
+                LIMIT 10
+            ''', (student[0],)) as cursor:
+                news_items = await cursor.fetchall()
+
+            if not news_items:
+                await message.answer("Новостей пока нет.")
+                return
+
+            response = "📰 Последние новости:\n\n"
+            for news in news_items:
+                news_id, title, description, date, place = news
+                response += (
+                    f"📌 <b>{title}</b>\n"
+                    f"📅 {date}\n"
+                )
+                if place:
+                    response += f"📍 {place}\n"
+                response += f"\n{description}\n\n"
+                response += "――――――――――――――――――――\n\n"
+
+            await message.answer(response, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error fetching news: {e}")
+        await message.answer("Произошла ошибка при получении новостей.")
 
 
 @router.message(F.text == "📊 Тесты")

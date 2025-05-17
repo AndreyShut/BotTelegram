@@ -4,18 +4,55 @@ from aiogram import Bot
 import logging
 from app.state import BotState
 from datetime import datetime
+import os
+import hashlib
 
 logger = logging.getLogger(__name__)
+
+class FileWatcher:
+    def __init__(self):
+        self.file_hashes = {}
+        
+    async def get_file_hash(self, file_path):
+        if not os.path.exists(file_path):
+            return None
+            
+        with open(file_path, 'rb') as f:
+            file_hash = hashlib.md5(f.read()).hexdigest()
+        return file_hash
+        
+    async def check_file_changes(self, file_path):
+        current_hash = await self.get_file_hash(file_path)
+        if not current_hash:
+            return False
+            
+        if file_path not in self.file_hashes:
+            self.file_hashes[file_path] = current_hash
+            return False
+            
+        if self.file_hashes[file_path] != current_hash:
+            self.file_hashes[file_path] = current_hash
+            return True
+            
+        return False
 
 async def notify_users(bot: Bot):
     sent_news = set()
     db_connection = None
+    file_watcher = FileWatcher()
+    
+    # Файлы для отслеживания изменений
+    schedule_files = [
+        "Расписание_групп.xlsx",
+        "Расписание_преподавателей.xls",
+        "График_задолженностей.xlsx"
+    ]
     
     try:
         db_connection = await aiosqlite.connect('student_bot.db')
         while True:
             try:
-                # Получаем только опубликованные новости, которые еще не отправлялись
+                # 1. Проверка новых новостей
                 async with db_connection.execute('''
                     SELECT id, title, description, for_all_groups 
                     FROM news 
@@ -32,9 +69,7 @@ async def notify_users(bot: Bot):
                             
                         success_sends = 0
                         
-                        # Формируем запрос в зависимости от типа новости (для всех или для конкретных групп)
                         if for_all_groups:
-                            # Для всех активных пользователей
                             query = '''
                                 SELECT s.telegram_id 
                                 FROM students s
@@ -43,7 +78,6 @@ async def notify_users(bot: Bot):
                             '''
                             params = ()
                         else:
-                            # Только для пользователей из определенных групп
                             query = '''
                                 SELECT s.telegram_id 
                                 FROM students s
@@ -54,11 +88,9 @@ async def notify_users(bot: Bot):
                             '''
                             params = (news_id,)
                         
-                        # Получаем список пользователей для рассылки
                         async with db_connection.execute(query, params) as cursor:
                             recipients = await cursor.fetchall()
                         
-                        # Отправляем новость каждому пользователю
                         for (telegram_id,) in recipients:
                             try:
                                 await bot.send_message(
@@ -66,9 +98,8 @@ async def notify_users(bot: Bot):
                                     text=f'📢 {title}\n\n{description}'
                                 )
                                 success_sends += 1
-                                await asyncio.sleep(0.5)  # Задержка между сообщениями
+                                await asyncio.sleep(0.5)
                                 
-                                # Записываем факт отправки
                                 await db_connection.execute(
                                     'INSERT INTO sent_notifications (news_id, user_id) VALUES (?, ?)',
                                     (news_id, telegram_id)
@@ -76,7 +107,6 @@ async def notify_users(bot: Bot):
                                 
                             except Exception as e:
                                 if "chat not found" in str(e):
-                                    # Помечаем пользователя как неактивного
                                     await db_connection.execute(
                                         'UPDATE students SET is_active = 0 WHERE telegram_id = ?',
                                         (telegram_id,)
@@ -90,7 +120,7 @@ async def notify_users(bot: Bot):
                             sent_news.add(news_id)
                             logger.info(f"Новость {news_id} отправлена {success_sends} пользователям")
                 
-                # Проверяем тесты с ближайшим дедлайном (за 1 день до)
+                # 2. Проверка тестов
                 today = datetime.now().strftime("%Y-%m-%d")
                 async with db_connection.execute('''
                     SELECT t.id, t.test_link, t.date, g.name_group, s.name 
@@ -103,7 +133,6 @@ async def notify_users(bot: Bot):
                 
                 if upcoming_tests:
                     for test_id, test_link, test_date, group_name, subject_name in upcoming_tests:
-                        # Получаем студентов группы
                         async with db_connection.execute('''
                             SELECT telegram_id FROM students 
                             WHERE id_group = (SELECT id FROM groups WHERE name_group = ?)
@@ -126,7 +155,39 @@ async def notify_users(bot: Bot):
                             except Exception as e:
                                 logger.error(f"Ошибка отправки напоминания о тесте {telegram_id}: {e}")
                 
-                await asyncio.sleep(60)  # Проверка каждую минуту
+                # 3. Проверка изменений в файлах расписания
+                for file_path in schedule_files:
+                    if await file_watcher.check_file_changes(file_path):
+                        logger.info(f"Обнаружено изменение в файле {file_path}")
+                        
+                        # Определяем тип расписания по имени файла
+                        if "групп" in file_path:
+                            schedule_type = "групп"
+                        elif "преподавателей" in file_path:
+                            schedule_type = "преподавателей"
+                        else:
+                            schedule_type = "задолженностей"
+                        
+                        # Получаем всех активных пользователей
+                        async with db_connection.execute('''
+                            SELECT telegram_id FROM students 
+                            WHERE telegram_id IS NOT NULL
+                            AND is_active = 1
+                        ''') as cursor:
+                            users = await cursor.fetchall()
+                        
+                        # Отправляем уведомление
+                        for (telegram_id,) in users:
+                            try:
+                                await bot.send_message(
+                                    chat_id=telegram_id,
+                                    text=f'ℹ️ Обновлено расписание {schedule_type}!'
+                                )
+                                await asyncio.sleep(0.5)
+                            except Exception as e:
+                                logger.error(f"Ошибка отправки уведомления об изменении расписания {telegram_id}: {e}")
+                
+                await asyncio.sleep(60)
                 
             except Exception as e:
                 logger.error(f"Ошибка в цикле рассылки: {e}")
