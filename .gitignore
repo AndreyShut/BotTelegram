@@ -4,6 +4,7 @@
 .env
 .env.local
 .env*.backup
+*.json
 
 # Виртуальное окружение Python
 .venv/

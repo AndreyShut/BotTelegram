@@ -8,7 +8,10 @@ import asyncio
 import app.keyboards as kb
 from app.state import BotState
 from app.db_manager import db
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -123,7 +126,7 @@ async def process_password(message: Message, state: FSMContext):
     login = data.get("login")
 
     # обработка режима администратора
-    if login == 'admin' and password == 'admin':
+    if login == os.getenv("ADMIN_LOGIN") and password == os.getenv("ADMIN_PASSWORD"):
         # Устанавливаем новое состояние
         await state.set_state(AuthStates.authorized)
         await state.update_data(is_admin=True)

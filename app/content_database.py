@@ -1,6 +1,8 @@
 import sqlite3
 from security import PasswordManager
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+import json
+
 
 def populate_database():
     conn = sqlite3.connect('student_bot.db')
@@ -8,222 +10,120 @@ def populate_database():
     pw_manager = PasswordManager()
 
     # Группы
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (1, '21ВВС1'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (2, '21ВА1'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (3, '22ВВС1'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (4, '22ВА1'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (5, '23ВВВ4'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (6, '23ВА1'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (7, '24ВВВ4'))
-    cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", (8, '24ВА1'))
+    groups = [
+        (1, '21ВВС1'), (2, '21ВА1'), (3, '22ВВС1'), 
+        (4, '22ВА1'), (5, '23ВВВ4'), (6, '23ВА1'), 
+        (7, '24ВВВ4'), (8, '24ВА1')
+    ]
+    for group in groups:
+        cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", group)
 
-    # Пользователи
-    # 21ВВС1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (2,1,'a00001',pw_manager.encrypt('00001'), "Гребенев А.С."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (3,1,'a00002',pw_manager.encrypt('00002'), "Калыева С.К."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (4,2,'a00003',pw_manager.encrypt('00003'), "Колокольцева У.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (5,1,'a00004',pw_manager.encrypt('00004'), "Купцов Т.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (6,1,'a00005',pw_manager.encrypt('00005'), "Куряев Ю.Р."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (7,1,'a00006',pw_manager.encrypt('00006'), "Нагорная Д.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (8,1,'a00007',pw_manager.encrypt('00007'), "Никитин М.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (9,1,'a00008',pw_manager.encrypt('00008'), "Никишин Д.Д."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (10,1,'a00009',pw_manager.encrypt('00009'), "Ошкин И.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (11,1,'a00010',pw_manager.encrypt('00010'), "Роганов Д.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (12,1,'a00011',pw_manager.encrypt('00011'), "Савкин В.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (13,1,'a00012',pw_manager.encrypt('00012'), "Сурков Е.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (14,1,'a00013',pw_manager.encrypt('00013'), "Шутихин А.Э."))
+    # Студенты
+    with open("students.json", "r", encoding='utf-8') as f:
+        students_data = json.load(f)
 
-    #21ВА1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (15, 2, 'b00001', pw_manager.encrypt('10001'), "Акимов Н.М."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (16, 2, 'b00002', pw_manager.encrypt('10002'), "Груша С.П."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (17, 2, 'b00003', pw_manager.encrypt('10003'), "Жанибекова А.Ж."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (18, 2, 'b00004', pw_manager.encrypt('10004'), "Женишбек Кызы Э.Ж."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (19, 2, 'b00005', pw_manager.encrypt('10005'), "Иёшин И.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (20, 2, 'b00006', pw_manager.encrypt('10006'), "Ишенбеков Н."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (21, 2, 'b00007', pw_manager.encrypt('10007'), "Кияев М.А.]"))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (22, 2, 'b00008', pw_manager.encrypt('10008'), "Комаров М.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (23, 2, 'b00009', pw_manager.encrypt('10009'), "Медведев Д.С."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (24, 2, 'b00010', pw_manager.encrypt('10010'), "Мещеряков А.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (25, 2, 'b00011', pw_manager.encrypt('10011'), "Науменко А.С."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (26, 2, 'b00012', pw_manager.encrypt('10012'), "Парвадов А.А."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (27, 2, 'b00013', pw_manager.encrypt('10013'), "Пачков А.В."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (28, 2, 'b00014', pw_manager.encrypt('10014'), "Самиев К.Т."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (29, 2, 'b00015', pw_manager.encrypt('10015'), "Славогородский Т.М."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (30, 2, 'b00016', pw_manager.encrypt('10016'), "Тамбовцева В.Д."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (31, 2, 'b00017', pw_manager.encrypt('10017'), "Тилявов А.Р."))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (32, 2, 'b00018', pw_manager.encrypt('10018'), "Федяшкина А.А."))
-
-    #22ВВС1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (33, 3, 'c00001', pw_manager.encrypt('20001'), 'Беспалов Н.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (34, 3, 'c00002', pw_manager.encrypt('20002'), 'Денисов Д.К.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (35, 3, 'c00003', pw_manager.encrypt('20003'), 'Жуков И.О.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (36, 3, 'c00004', pw_manager.encrypt('20004'), 'Казаров И.И.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (37, 3, 'c00005', pw_manager.encrypt('20005'), 'Костин М.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (38, 3, 'c00006', pw_manager.encrypt('20006'), 'Краснорылов М.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (39, 3, 'c00007', pw_manager.encrypt('20007'), 'Лавникович К.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (40, 3, 'c00008', pw_manager.encrypt('20008'), 'Макеева Д.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (41, 3, 'c00009', pw_manager.encrypt('20009'), 'Разин Д.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (42, 3, 'c00010', pw_manager.encrypt('20010'), 'Сайганов Д.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (43, 3, 'c00011', pw_manager.encrypt('20011'), 'Токарев А.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (44, 3, 'c00012', pw_manager.encrypt('20012'), 'Чумаев С.К.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (45, 3, 'c00013', pw_manager.encrypt('20013'), 'Эрмедов А.Э.'))
-
-    #22ВА1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (46, 4, 'd00001', pw_manager.encrypt('30001'), 'Беклемышев Е.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (47, 4, 'd00002', pw_manager.encrypt('30002'), 'Васькина А.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (48, 4, 'd00003', pw_manager.encrypt('30003'), 'Голубенков Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (49, 4, 'd00004', pw_manager.encrypt('30004'), 'Грунина А.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (50, 4, 'd00005', pw_manager.encrypt('30005'), 'Денисов В.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (51, 4, 'd00006', pw_manager.encrypt('30006'), 'Каленов А.Ю.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (52, 4, 'd00007', pw_manager.encrypt('30007'), 'Коньшин И.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (53, 4, 'd00008', pw_manager.encrypt('30008'), 'Ольтьян А.О.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (54, 4, 'd00009', pw_manager.encrypt('30009'), 'Попченков Д.И.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (55, 4, 'd00010', pw_manager.encrypt('30010'), 'Пузенцов Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (56, 4, 'd00011', pw_manager.encrypt('30011'), 'Суетин М.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (57, 4, 'd00012', pw_manager.encrypt('30012'), 'Тюрина В.В.'))
-
-    #23ВВВ4
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (58, 5, 'e00001', pw_manager.encrypt('40001'), 'Абдуллаев А.Ш.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (59, 5, 'e00002', pw_manager.encrypt('40002'), 'Алешин К.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (60, 5, 'e00003', pw_manager.encrypt('40003'), 'Беглов И.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (61, 5, 'e00004', pw_manager.encrypt('40004'), 'Брагин А.М.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (62, 5, 'e00005', pw_manager.encrypt('40005'), 'Герасимов К.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (63, 5, 'e00006', pw_manager.encrypt('40006'), 'Гришаев Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (64, 5, 'e00007', pw_manager.encrypt('40007'), 'Епинин Д.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (65, 5, 'e00008', pw_manager.encrypt('40008'), 'Зарубин Я.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (66, 5, 'e00009', pw_manager.encrypt('40009'), 'Калинин А.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (67, 5, 'e00010', pw_manager.encrypt('40010'), 'Королев Д.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (68, 5, 'e00011', pw_manager.encrypt('40011'), 'Костин К.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (69, 5, 'e00012', pw_manager.encrypt('40012'), 'Куц П.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (70, 5, 'e00013', pw_manager.encrypt('40013'), 'Святов И.Ю.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (71, 5, 'e00014', pw_manager.encrypt('40014'), 'Соснин Г.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (72, 5, 'e00015', pw_manager.encrypt('40015'), 'Тинчурин Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (73, 5, 'e00016', pw_manager.encrypt('40016'), 'Фельдман Г.О.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (74, 5, 'e00017', pw_manager.encrypt('40017'), 'Финаев М.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (75, 5, 'e00018', pw_manager.encrypt('40018'), 'Фокин К.А.'))
-        
-    #23ВА1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (76, 6, 'f00001', pw_manager.encrypt('50001'), 'Белянкина В.О.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (77, 6, 'f00002', pw_manager.encrypt('50002'), 'Буйдин К.Е.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (78, 6, 'f00003', pw_manager.encrypt('50003'), 'Быченкова А.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (79, 6, 'f00004', pw_manager.encrypt('50004'), 'Гапаров А.Г.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (80, 6, 'f00005', pw_manager.encrypt('50005'), 'Гармаш Р.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (81, 6, 'f00006', pw_manager.encrypt('50006'), 'Еникеев Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (82, 6, 'f00007', pw_manager.encrypt('50007'), 'Жумакенова А.Ж.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (83, 6, 'f00008', pw_manager.encrypt('50008'), 'Ковешников Я.Е.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (84, 6, 'f00009', pw_manager.encrypt('50009'), 'Козюков В.Р.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (85, 6, 'f00010', pw_manager.encrypt('50010'), 'Колчанов Н.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (86, 6, 'f00011', pw_manager.encrypt('50011'), 'Кудряшов В.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (87, 6, 'f00012', pw_manager.encrypt('50012'), 'Левицкий Д.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (88, 6, 'f00013', pw_manager.encrypt('50013'), 'Макаров В.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (89, 6, 'f00014', pw_manager.encrypt('50014'), 'Манцерова П.Е.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (90, 6, 'f00015', pw_manager.encrypt('50015'), 'Мосина А.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (91, 6, 'f00016', pw_manager.encrypt('50016'), 'Мурашкин Д.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (92, 6, 'f00017', pw_manager.encrypt('50017'), 'Сараева А.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (93, 6, 'f00018', pw_manager.encrypt('50018'), 'Шарипов К.Ш.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (94, 6, 'f00019', pw_manager.encrypt('50019'), 'Якунин В.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (95, 6, 'f00020', pw_manager.encrypt('50020'), 'Якунин Д.В.'))
-        
-    #24ВВВ4
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (96, 7, 'g00001', pw_manager.encrypt('60001'), 'Аверьянов Д.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (97, 7, 'g00002', pw_manager.encrypt('60002'), 'Агуреев А.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (98, 7, 'g00003', pw_manager.encrypt('60003'), 'Амиров М.Р.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (99, 7, 'g00004', pw_manager.encrypt('60004'), 'Анисимов А.Ю.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (100, 7, 'g00005', pw_manager.encrypt('60005'), 'Атамурадов Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (101, 7, 'g00006', pw_manager.encrypt('60006'), 'Бывшева А.Ю.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (102, 7, 'g00007', pw_manager.encrypt('60007'), 'Васин И.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (103, 7, 'g00008', pw_manager.encrypt('60008'), 'Гречушников В.И.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (104, 7, 'g00009', pw_manager.encrypt('60009'), 'Евсеев К.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (105, 7, 'g00010', pw_manager.encrypt('60010'), 'Кондратьев С.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (106, 7, 'g00011', pw_manager.encrypt('60011'), 'Конкина С.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (107, 7, 'g00012', pw_manager.encrypt('60012'), 'Косырников М.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (108, 7, 'g00013', pw_manager.encrypt('60013'), 'Кошелев Р.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (109, 7, 'g00014', pw_manager.encrypt('60014'), 'Невежин И.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (110, 7, 'g00015', pw_manager.encrypt('60015'), 'Орлов Р.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (111, 7, 'g00016', pw_manager.encrypt('60016'), 'Симаков А.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (112, 7, 'g00017', pw_manager.encrypt('60017'), 'Суходолов И.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (113, 7, 'g00018', pw_manager.encrypt('60018'), 'Чердаков В.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (114, 7, 'g00019', pw_manager.encrypt('60019'), 'Чернышевский Е.И.'))
-        
-    #24ВА1
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (115, 8, 'h00001', pw_manager.encrypt('70001'), 'Бахтуев В.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (116, 8, 'h00002', pw_manager.encrypt('70002'), 'Безруков Н.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (117, 8, 'h00003', pw_manager.encrypt('70003'), 'Белоусов А.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (118, 8, 'h00004', pw_manager.encrypt('70004'), 'Белоусов Е.П.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (119, 8, 'h00005', pw_manager.encrypt('70005'), 'Герасимов Р.Д.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (120, 8, 'h00006', pw_manager.encrypt('70006'), 'Желнов А.С.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (121, 8, 'h00007', pw_manager.encrypt('70007'), 'Клочкова П.Е.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (122, 8, 'h00008', pw_manager.encrypt('70008'), 'Коршунов Н.Р.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (123, 8, 'h00009', pw_manager.encrypt('70009'), 'Куничкин И.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (124, 8, 'h00010', pw_manager.encrypt('70010'), 'Малякин С.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (125, 8, 'h00011', pw_manager.encrypt('70011'), 'Мурзин Н.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (126, 8, 'h00012', pw_manager.encrypt('70012'), 'Нурматов Р.Р.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (127, 8, 'h00013', pw_manager.encrypt('70013'), 'Саидалиев Д.И.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (128, 8, 'h00014', pw_manager.encrypt('70014'), 'Спиридонов В.В.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (129, 8, 'h00015', pw_manager.encrypt('70015'), 'Феденко К.А.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (130, 8, 'h00016', pw_manager.encrypt('70016'), 'Филюков Н.Р.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (131, 8, 'h00017', pw_manager.encrypt('70017'), 'Фозилов О.У.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (132, 8, 'h00018', pw_manager.encrypt('70018'), 'Холиков Ф.Б.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (133, 8, 'h00019', pw_manager.encrypt('70019'), 'Черкасов В.Е.'))
-    cur.execute("INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)", (134, 8, 'h00020', pw_manager.encrypt('70020'), 'Ясянкин Н.А.'))
-
+    for group_id, students in students_data.items():
+        for student in students:
+            id_student = student["id"]
+            login = student["login"]
+            password = student["password"]
+            description = student["name"]
+            cur.execute(
+                "INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)",
+                (id_student, group_id, login, pw_manager.encrypt(password), description)
+            )
 
 
  # Добавляем преподавателей
-    teachers = ['Иванов И.И.', 'Петров П.П.', 'Сидорова С.С.']
+    teachers = ['Бурукина И.П.', 'Бершадский А.М.', 'Бождай А.С.', 
+                'Финогеев А.Г.', 'Подмарькова Е.М.', 'Тимонин А.Ю.', 
+                'Селиверстова И.A.', 'Глотова Т.В.', 'Валько А.Ф.', 
+                'Евсеева Ю.И.', 'Гудков А.А.', 'Гудков П.А.', 
+                'Финогеев А.А.', 'Эпп В.В.','Мурысина Н.Н.',
+                'Яшин С.В.','Болотникова О.В.','Калиниченко Е.И.',
+                'Митрохина Н.Ю', 'Юрова О.В.', 'Гарбуз Г.В.', 
+                'Слепцов Н.В.','Генералова А.А.','Голотенков Н.О.',
+                'Токарев А.Н.','Сеидов Ш.Г.','Кучигина С.К.',
+                'Тимошина С.А.','Данкова Н.С.','Самуйлова С.В.',
+                'Мусорина О.А.','Романова Е.Г','Акифьев И.В.',
+                'Дубинин В.Н.','Логинова О.А.','Митишев А.В.',
+                'Авдонина Л.А.', 'Синев М.П.', 'Исхаков Н.В.',
+                'Бычков А.С.', 'Семенов А.О.', 'Леонова Т.Ю.',
+                'Мишина К.Д.', 'Бикташев Р.А.', 'Ермохина Е.Н.',
+                'Никишин К.И.', 'Кузьмин А.В.', 'Масленников А.А.','Кузнецова О.Ю.'
+                ]
     for teacher in teachers:
         cur.execute("INSERT OR IGNORE INTO teachers (full_name) VALUES (?)", (teacher,))
 
-    # Добавляем предметы
-    subjects = ['Математика', 'Физика', 'Программирование']
-    for subject in subjects:
-        cur.execute("INSERT OR IGNORE INTO subjects (name) VALUES (?)", (subject,))
-
-    # Связываем преподавателей с предметами
-    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (1, 1)")
-    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (1, 2)")
-    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (2, 3)")
-    cur.execute("INSERT OR IGNORE INTO teacher_subjects VALUES (3, 1)")
-
-    # Добавляем тесты
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    cur.execute('''
-        INSERT OR IGNORE INTO tests 
-        (group_id, subject_id, teacher_id, test_link, date) 
-        VALUES (1, 1, 1, 'https://example.com/test1', ?)
-    ''', (tomorrow,))
-
-    # Добавляем расписание преподавателей
-    cur.execute('''
-        INSERT OR IGNORE INTO teacher_schedule 
-        (teacher_id, subject_id, day_of_week, start_time, end_time, is_even_week) 
-        VALUES (1, 1, 1, '09:00', '10:30', NULL)
-    ''')
-
-    # Добавляем график приема задолженностей
-    cur.execute('''
-        INSERT OR IGNORE INTO debt_schedule 
-        (teacher_id, subject_id, day_of_week, start_time, end_time, classroom) 
-        VALUES (1, 1, 3, '14:00', '16:00', 'Ауд. 101')
-    ''')
-
-    # Добавляем типы долгов
-    debt_types = ['Контрольная работа', 'Лабораторная работа', 'Экзамен']
+  # Заполнение типов задолженностей
+    debt_types = ['Экзамен', 'Зачет', 'Зачет с оценкой', 'Курсовая работа']
     for debt_type in debt_types:
-        cur.execute("INSERT OR IGNORE INTO debt_types (name) VALUES (?)", (debt_type,))
+        cur.execute('INSERT INTO debt_types (name) VALUES (?)', (debt_type,))
 
+    # Заполнение предметов
+    subjects = [ 'Кураторский час','Физика','Математика','Арифметические и логические основы ВТ',
+                'Информационные технологии в проф. деятельности','История России','Элективные дисциплины по физической культуре и спорту',
+                'Программирование','Правоведение','Вычислительные и ИС','Русский язык и деловые коммуникации','Ин.яз',
+                'Математический анализ','Информатика','Алгебра и теория чисел','Геометрия и топология','Инсталляция и эксплуатация ВСиС',
+                'Декларативные языки прогр.','О - ОП','ОиСП','ДВ Основы первой доврачебной помощи','ДВ Основы военной подготовки',
+                'Интерфейсы программирования приложений','Компьютерная графика и 3D моделирование','Электротехника, электроника и схемотехника',
+                'Теория автоматов','Дисциплина по выбору','МО ИС','Математическое обеспечение информационных систем',
+                'ДВ Лингвистическое и программное обеспечения','Вычислительные методы в системах администрирования','Компьютерная графика',
+                'Структуры и алгоритмы компьютерной обработки данных','Администрирование инфокоммуникационных систем','Автоматизация конструкторского проектирования ЭА',
+                'Компьютерное моделирование в системах АП','ЭВМ и периферийные устройства','Технологии разработки программного обеспечения',
+                'Экономико-правовые основы рынка программного обеспечения','Качество и тестирование программного обеспечения', 
+                'Мультимедийные технологии', 'Интеллектуализация информационных систем','Проектирование ИС c использованием ШП',
+                'Операционные системы и оболочки', 'Информационные технологии','Модели и методы анализа ПР','Геометрическое моделирование в системах АП',
+                'Системы реального времени','Архитектура компьютерных систем','Администрирование информационных систем',
+                ]
+    for subject in subjects:
+        cur.execute('INSERT INTO subjects (name) VALUES (?)', (subject,))
 
-    # Добавляем новости
-    cur.execute('''
-        INSERT OR IGNORE INTO news 
-        (title, description, date, for_all_groups, is_published) 
-        VALUES 
-        ('Общая новость', 'Эта новость для всех', datetime('now'), 1, 1),
-        ('Новость для группы 1', 'Только для группы 1', datetime('now'), 0, 1)
-    ''')
+    # Заполнение новостей
+    news_data = [
+        ('Отмена занятий', 'В связи с отключением электричества занятия отменены с 11:40 16.05.2025', 
+         (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'), '7к', 0, 1),
+        ('Собрание старост', 'Собрание старост в 15:00', 
+         datetime.now().strftime('%Y-%m-%d'), '7а-203', 0, 1),
+         ('Собрание группы', 'Собрание группы по поводу практики ', 
+         datetime.now().strftime('%Y-%m-%d'), '7а-203', 1, 1),
+    ]
+    for news in news_data:
+        cur.execute('''
+            INSERT INTO news (title, description, date, place, for_all_groups, is_published)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', news)
 
-    # Связываем новость с группой
-    cur.execute("INSERT OR IGNORE INTO news_groups VALUES (2, 1)")
+    # Связи новостей и групп (для новостей не для всех)
+    news_groups = [(3, 1)]  # Собрание старост только для 21ВВС1 и 21ВА1
+    for ng in news_groups:
+        cur.execute('INSERT INTO news_groups (news_id, group_id) VALUES (?, ?)', ng)
+    
+        # Заполнение тестов
+    tests_data = [
+        (1, 48, 1, 'https://test.com', (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d')),
+        (2, 48, 1, 'https://test.com', (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')),
+        (3, 2, 1, 'https://test.com', (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d'))
+    ]
+    for test in tests_data:
+        cur.execute('''
+            INSERT INTO tests (group_id, subject_id, teacher_id, test_link, date)
+            VALUES (?, ?, ?, ?, ?)
+        ''', test)
+
+        # Задолженности студентов
+    student_debts_data = [
+        (1, 2, 1, (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d')),  
+        (1, 3, 2, (datetime.now() + timedelta(days=21)).strftime('%Y-%m-%d')),  
+        (3, 1, 4, (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')),   
+        (4, 2, 3, (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d'))   
+    ]
+    for debt in student_debts_data:
+        cur.execute('''
+            INSERT INTO student_debts (student_id, subject_id, debt_type_id, last_date)
+            VALUES (?, ?, ?, ?)
+        ''', debt)
+
 
     conn.commit()
     conn.close()
