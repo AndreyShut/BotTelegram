@@ -1,12 +1,10 @@
-from aiogram import Router, F
+from aiogram import Router, F, types
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 import logging
-import asyncio
 import app.keyboards as kb
-from app.state import BotState
 from app.db_manager import db
 from dotenv import load_dotenv
 import os
@@ -193,31 +191,10 @@ async def main_menu(message: Message, state: FSMContext):
         await message.answer("Вы в главном меню.", reply_markup=kb.main)
 
 
-@router.message(F.text == "Новости")
-async def show_news(message: Message):
-    async with db.get_connection() as db:
-        try:
-            async with db.execute("SELECT title, description, date, place FROM news ORDER BY date DESC") as cur:
-                all_news = await cur.fetchall()
-            
-            if not all_news:
-                await message.answer("Новостей пока нет.")
-                return
-
-            text = ""
-            for news in all_news:
-                title, description, date, place = news
-                text += f"<b>{title}</b>\n{description or ''}\nДата: {date}"
-                if place:
-                    text += f"\nМесто: {place}"
-                text += "\n\n"
-            await message.answer(text.strip(), parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"Error fetching news: {e}")
-            await message.answer("Произошла ошибка при получении новостей.")
 
 
-@router.message(F.text == "Тесты")
+
+@router.message(F.text == "📊 Тесты")
 async def show_tests(message: Message):
     try:
         # Получаем студента
@@ -259,3 +236,85 @@ async def show_tests(message: Message):
     except Exception as e:
         logger.error(f"Error fetching tests: {e}")
         await message.answer("Произошла ошибка при получении списка тестов.")
+
+
+@router.message(F.text == "📝 Задолженности")
+async def show_debts(message: Message):
+    try:
+        # Получаем студента
+        student = await get_student_by_telegram(message.from_user.id)
+        if not student:
+            await message.answer("Сначала авторизуйтесь с помощью /start")
+            return
+
+        async with db.get_connection() as conn:
+            # Получаем долги студента
+            async with conn.execute('''
+                SELECT s.name, dt.name, sd.last_date 
+                FROM student_debts sd
+                JOIN subjects s ON sd.subject_id = s.id
+                JOIN debt_types dt ON sd.debt_type_id = dt.id
+                WHERE sd.student_id = ?
+                ORDER BY sd.last_date
+            ''', (student[0],)) as cursor:
+                debts = await cursor.fetchall()
+
+            if not debts:
+                await message.answer("У вас нет академических долгов.")
+                return
+
+            response = "📝 Ваши долги:\n\n"
+            for debt in debts:
+                subject, debt_type, last_date = debt
+                response += (
+                    f"📌 <b>{subject}</b>\n"
+                    f"🔴 Тип долга: {debt_type}\n"
+                    f"📅 Крайний срок: {last_date}\n\n"
+                )
+
+            await message.answer(response, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error fetching debts: {e}")
+        await message.answer("Произошла ошибка при получении списка долгов.")
+
+
+
+
+@router.message(F.text == "📅 Расписание")
+async def schedule_handler(message: Message):
+    await message.answer("Выберите тип расписания:", reply_markup=kb.schedule_menu)
+
+@router.message(F.text == "👥 Расписание групп")
+async def send_group_schedule(message: Message):
+    file_path = "Расписание_групп.xlsx"
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            await message.answer_document(types.BufferedInputFile(file.read(), filename=file_path), 
+                                        reply_markup=kb.schedule_menu)
+    else:
+        await message.answer("Файл с расписанием групп не найден.", reply_markup=kb.schedule_menu)
+
+@router.message(F.text == "👨‍🏫 Расписание преподавателей")
+async def send_teacher_schedule(message: Message):
+    file_path = "Расписание_преподавателей.xls"
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            await message.answer_document(types.BufferedInputFile(file.read(), filename=file_path),
+                                        reply_markup=kb.schedule_menu)
+    else:
+        await message.answer("Файл с расписанием преподавателей не найден.", reply_markup=kb.schedule_menu)
+
+@router.message(F.text == "⏳ График приёма задолженностей")
+async def send_debt_schedule(message: Message):
+    file_path = "График_задолженностей.xlsx"
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            await message.answer_document(types.BufferedInputFile(file.read(), filename=file_path),
+                                        reply_markup=kb.schedule_menu)
+    else:
+        await message.answer("Файл с графиком задолженностей не найден.", reply_markup=kb.schedule_menu)
+
+@router.message(F.text == "🔙 Назад в меню")
+async def back_to_main_menu(message: Message):
+    await message.answer("Главное меню:", reply_markup=kb.main)
