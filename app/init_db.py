@@ -1,6 +1,6 @@
-from database import create_database
+from database import  StudentBotDB
 from content_database import populate_database
 
 if __name__ == "__main__":
-    create_database()  
+    StudentBotDB()
     populate_database() 
