@@ -62,6 +62,18 @@ def create_database():
     ''')
 
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS disciplines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_id INTEGER NOT NULL,
+            teacher_id INTEGER NOT NULL,
+            FOREIGN KEY (subject_id) REFERENCES subjects(id),
+            FOREIGN KEY (teacher_id) REFERENCES teachers(id),
+            UNIQUE(subject_id, teacher_id)  -- Один преподаватель не может быть назначен на один предмет несколько раз
+        )
+    ''')
+
+
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS news_groups (
             news_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
@@ -86,29 +98,28 @@ def create_database():
         CREATE TABLE IF NOT EXISTS tests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
-            subject_id INTEGER NOT NULL,
-            teacher_id INTEGER NOT NULL,
+            discipline_id INTEGER NOT NULL,
             test_link TEXT NOT NULL,
             date TEXT NOT NULL,
             FOREIGN KEY (group_id) REFERENCES groups(id),
-            FOREIGN KEY (subject_id) REFERENCES subjects(id),
-            FOREIGN KEY (teacher_id) REFERENCES teachers(id)
+            FOREIGN KEY (discipline_id) REFERENCES disciplines(id)
         )
     ''')
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS student_debts (
             student_id INTEGER NOT NULL,
-            subject_id INTEGER NOT NULL,
+            discipline_id INTEGER NOT NULL,
             debt_type_id INTEGER NOT NULL,
             last_date TEXT NOT NULL,       -- "YYYY-MM-DD"
-            PRIMARY KEY (student_id, subject_id, debt_type_id),
+            PRIMARY KEY (student_id, discipline_id, debt_type_id),
             FOREIGN KEY (student_id) REFERENCES students(id_student),
-            FOREIGN KEY (subject_id) REFERENCES subjects(id),
+            FOREIGN KEY (discipline_id) REFERENCES disciplines(id),
             FOREIGN KEY (debt_type_id) REFERENCES debt_types(id)
         )
     ''')
 
+    
     
     connection.commit()
     connection.close()
