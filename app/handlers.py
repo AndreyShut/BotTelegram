@@ -405,8 +405,9 @@ async def show_debts(message: Message):
                 f"⏳ Крайний срок: {last_date}\n"
                 "----------\n"
             )
-        await message.answer(response)
+        await safe_send_message(message, response, parse_mode="HTML")
         
+
     except Exception as e:
         logger.error(f"Error fetching debts: {e}")
         await message.answer("❌ Ошибка получения информации о задолженностях")
@@ -445,7 +446,7 @@ async def show_tests(message: Message):
                 f"🔗 <a href=\"{test_link}\">Ссылка на тест</a>\n"
                 "----------\n"
             )
-        await message.answer(response, parse_mode="HTML")
+        await safe_send_message(message, response, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error fetching tests: {e}")
         await message.answer("❌ Ошибка получения тестов.")
@@ -488,7 +489,7 @@ async def show_news(message: Message):
                 response += f"\n{description}\n\n"
                 response += "――――――――――――――――――――\n\n"
 
-            await message.answer(response, parse_mode="HTML")
+            await safe_send_message(message, response, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error fetching news: {e}")
@@ -543,7 +544,8 @@ async def test_add_group(message: Message, state: FSMContext):
         await state.set_state(AuthStates.admin_mode)
         return
     subject_list = '\n'.join([f"{sid}: {sname}" for sid, sname in subjects])
-    await message.answer(f"📋 Выберите ID предмета:\n{subject_list}")
+    await message.answer("📋 Выберите ID предмета:")
+    await safe_send_message(message, subject_list)
     await state.set_state(AddTestStates.waiting_subject)
 
 @router.message(AddTestStates.waiting_subject)
@@ -571,7 +573,8 @@ async def test_add_subject(message: Message, state: FSMContext):
         await state.set_state(AuthStates.admin_mode)
         return
     teachers_str = '\n'.join([f"{tid}: {tname}" for tid, tname in teachers])
-    await message.answer(f"👤 Выберите ID преподавателя:\n{teachers_str}")
+    await message.answer("👤 Выберите ID преподавателя:\n")
+    await safe_send_message(message, teachers_str)
     await state.set_state(AddTestStates.waiting_teacher)
 
 @router.message(AddTestStates.waiting_teacher)
@@ -656,8 +659,7 @@ async def list_tests(message: Message):
                 f"📅 Дата: {date}\n"
                 f"🔗 Ссылка: {link}\n\n"
             )
-        
-        await message.answer(response)
+        await safe_send_message(message, response, parse_mode="HTML")
     
     except Exception as e:
         logger.error(f"Error fetching tests list: {e}")
@@ -685,8 +687,8 @@ async def delete_test_start(message: Message, state: FSMContext):
             return
             
         tests_list = "\n".join([f"{t[0]}: {t[1]} - {t[2]} ({t[3]})" for t in tests])
-        await message.answer (f"📚 Введите ID теста для удаления:\n{tests_list}")
-            
+        await message.answer ("📚 Введите ID теста для удаления:")
+        await safe_send_message(message, tests_list, parse_mode="HTML")
         await state.set_state(AddTestStates.waiting_test_delete)
     
     except Exception as e:
@@ -876,7 +878,7 @@ async def list_news(message: Message):
             status = "✅ Опубликована" if is_published else "⏳ Не опубликована"
             response += f"📌 <b>{title}</b>\n📅 {date}\n{status}\nID: {news_id}\n\n"
         
-        await message.answer(response, parse_mode="HTML")
+        await safe_send_message(message, response, parse_mode="HTML")
     
     except Exception as e:
         logger.error(f"Error fetching news list: {e}")
@@ -963,7 +965,7 @@ async def unbind_user_start(message: Message, state: FSMContext):
             response += f"👤 {login} (Группа: {group})\nID: {user_id} | TG: {tg_id}\n\n"
         
         response += "\n🔗 Введите ID пользователя для отвязки или /all для отвязки всех:"
-        await message.answer(response)
+        await safe_send_message(message, response)
         await state.set_state(AuthStates.unbind_user_select)
     
     except Exception as e:
