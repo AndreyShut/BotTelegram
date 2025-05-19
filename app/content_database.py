@@ -1,5 +1,6 @@
+import asyncio
 import sqlite3
-from security import PasswordManager
+from db_manager import pm
 from datetime import datetime, timedelta
 import json
 import logging
@@ -40,13 +41,10 @@ def load_students_from_json(json_path: str) -> Dict:
         logger.error(f"Ошибка загрузки файла: {e}")
         raise
 
-def populate_database():
+async def populate_database():
     conn = sqlite3.connect('student_bot.db')
     cur = conn.cursor()
-    pw_manager = PasswordManager()
     
-
-
     # Группы
     groups = [
         (1, '21ВВС1'), (2, '21ВА1'), (3, '22ВВС1'), 
@@ -71,7 +69,8 @@ def populate_database():
                     continue
                 
                 try:
-                    encrypted_password = pw_manager.encrypt(student["password"])
+                    # Хеширование пароля
+                    hashed_password = await pm.hash_password(student["password"])
                     cur.execute(
                         """INSERT OR IGNORE INTO students 
                         (id_student, id_group, login, password, description) 
@@ -80,7 +79,7 @@ def populate_database():
                             student["id"],
                             group_id,
                             student["login"],
-                            encrypted_password,
+                            hashed_password,  # Используем уже хешированный пароль
                             student["name"]
                         )
                     )
@@ -259,9 +258,9 @@ def populate_database():
         ('Отмена занятий', 'В связи с отключением электричества занятия отменены с 11:40', 
          (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'), '7к', 0, 1),
         ('Собрание старост', 'Собрание старост в 15:00', 
-         datetime.now().strftime('%Y-%m-%d'), '7а-203', 0, 1),
+         datetime.now().strftime('%Y-%m-%d'), '7а-203', 0, 0),
          ('Собрание группы', 'Собрание группы по поводу практики ', 
-         datetime.now().strftime('%Y-%m-%d'), '7а-203', 1, 1),
+         datetime.now().strftime('%Y-%m-%d'), '7а-203', 1, 0),
     ]
     for news in news_data:
         cur.execute('''
@@ -304,4 +303,4 @@ def populate_database():
     conn.close()
 
 if __name__ == "__main__":
-    populate_database()  # Теперь скрипт нужно запускать вручную
+    asyncio.run(populate_database())  # Теперь скрипт нужно запускать вручную

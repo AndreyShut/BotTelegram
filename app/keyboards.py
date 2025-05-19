@@ -60,7 +60,7 @@ subjects_admin_kb = ReplyKeyboardMarkup(
 # Админ преподаватели
 teachers_admin_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📋 Список преподавателя")],
+        [KeyboardButton(text="📋 Список преподавателей")],
         [KeyboardButton(text="📝 Добавить преподавателя"), KeyboardButton(text="✏️ Редактировать преподавателя")],
         [KeyboardButton(text="❌ Удалить преподавателя"), KeyboardButton(text="🔙 Назад в админку")]
     ], resize_keyboard=True

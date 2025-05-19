@@ -10,9 +10,13 @@ logger = logging.getLogger(__name__)
 class PasswordManager:
     @staticmethod
     async def hash_password(password: str) -> str:
-        salt = bcrypt.gensalt()
+        """Хеширует пароль с использованием bcrypt"""
+        if not password:
+            raise ValueError("Password cannot be empty")
+        
+        # Генерируем соль и хешируем пароль
+        salt = bcrypt.gensalt()  
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-        # Если вдруг hashed уже str (редко, но мало ли) — просто верните его
         if isinstance(hashed, bytes):
             return hashed.decode('utf-8')
         return hashed
@@ -21,6 +25,9 @@ class PasswordManager:
     async def verify_password(hashed_password: str, plain_password: str) -> bool:
         """Проверяет соответствие пароля хешу"""
         try:
+            if not hashed_password or not plain_password:
+                return False
+            # Проверяем пароль
             return bcrypt.checkpw(
                 plain_password.encode('utf-8'),
                 hashed_password.encode('utf-8')

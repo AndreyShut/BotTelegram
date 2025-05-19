@@ -48,7 +48,7 @@ class StudentBotDB:
                 password TEXT NOT NULL,
                 description TEXT,
                 telegram_id INTEGER UNIQUE,
-                is_active INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
                 FOREIGN KEY (id_group) REFERENCES groups(id)
             )''',
             '''CREATE TABLE IF NOT EXISTS news (
