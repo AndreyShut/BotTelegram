@@ -14,6 +14,7 @@ class FileWatcher:
     def __init__(self):
         self.file_hashes = {}
         self.file_stats = {}  # Для хранения метаданных
+        self.file_notification_sent = False
         
     async def get_file_info(self, file_path: str) -> Optional[dict]:
         """Получает информацию о файле (хеш и метаданные)"""
@@ -51,12 +52,28 @@ class FileWatcher:
             if self.file_hashes[file_path] != current_info['hash']:
                 self.file_stats[file_path] = current_info
                 self.file_hashes[file_path] = current_info['hash']
+                self.file_notification_sent = False  # Сброс флага при изменении файла
                 return True
                 
         return False
+    
+
+
+
+
+async def mark_user_inactive(db_connection: aiosqlite.Connection, telegram_id: int):
+    """Помечает пользователя как неактивного"""
+    try:
+        await db_connection.execute(
+            "UPDATE students SET is_active = 0 WHERE telegram_id = ?",
+            (telegram_id,)
+        )
+        await db_connection.commit()
+        logger.info(f"Пользователь {telegram_id} помечен как неактивный")
+    except Exception as e:
+        logger.error(f"Ошибка при пометке пользователя {telegram_id} как неактивного: {e}")
 
 async def notify_users(bot: Bot):
-    sent_news = set()
     db_connection = None
     file_watcher = FileWatcher()
     
@@ -80,16 +97,17 @@ async def notify_users(bot: Bot):
                     SELECT n.id, n.title, n.description, n.for_all_groups, n.date, n.place 
                     FROM news n
                     WHERE n.is_published = 1 
-                    AND n.id NOT IN (SELECT news_id FROM sent_notifications)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM sent_notifications sn 
+                        WHERE sn.notification_type = 'news' 
+                        AND sn.entity_id = n.id
+                    )
                     ORDER BY n.date DESC
                 ''') as cursor:
                     news_list = await cursor.fetchall()
 
                 if news_list:
-                    for news_id, title, description, for_all_groups, date, place in news_list:
-                        if news_id in sent_news:
-                            continue
-                            
+                    for news_id, title, description, for_all_groups, date, place in news_list:                         
                         success_sends = 0
                         
                         if for_all_groups:
@@ -144,17 +162,16 @@ async def notify_users(bot: Bot):
                                 for j, result in enumerate(results):
                                     telegram_id = batch[j][0]
                                     if isinstance(result, Exception):
-                                        if "chat not found" in str(result):
-                                            await db_connection.execute(
-                                                'UPDATE students SET is_active = 0 WHERE telegram_id = ?',
-                                                (telegram_id,)
-                                            )
+                                        if "chat not found" in str(result) or "bot was blocked" in str(result).lower():
+                                            await mark_user_inactive(db_connection, telegram_id)
                                             logger.warning(f"Пользователь {telegram_id} недоступен, помечен как неактивный")
                                         else:
                                             logger.error(f"Ошибка отправки {telegram_id}: {result}")
                                     else:
                                         await db_connection.execute(
-                                            'INSERT INTO sent_notifications (news_id, user_id) VALUES (?, ?)',
+                                            '''INSERT INTO sent_notifications 
+                                            (notification_type, entity_id, user_id)
+                                            VALUES ('news', ?, ?)''',
                                             (news_id, telegram_id)
                                         )
                                         success_sends += 1
@@ -166,7 +183,6 @@ async def notify_users(bot: Bot):
                                 logger.error(f"Ошибка при отправке батча: {e}")
                         
                         if success_sends > 0:
-                            sent_news.add(news_id)
                             logger.info(f"Новость {news_id} отправлена {success_sends} пользователям")
                 
                 # 2. Проверка тестов (за 1 день до) с batch-обработкой
@@ -181,6 +197,11 @@ async def notify_users(bot: Bot):
                     JOIN subjects subj ON d.subject_id = subj.id
                     JOIN teachers tch ON d.teacher_id = tch.id
                     WHERE date(t.date) = date(?)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM sent_notifications sn 
+                        WHERE sn.notification_type = 'test' 
+                        AND sn.entity_id = t.id
+                    )
                 ''', (tomorrow.strftime("%Y-%m-%d"),)) as cursor:
                     upcoming_tests = await cursor.fetchall()
                 
@@ -203,6 +224,7 @@ async def notify_users(bot: Bot):
                                      f'🔗 Ссылка: <a href="{test_link}">Перейти к тесту</a>')
                         
                         # Batch-обработка
+                        success_sends = 0
                         for i in range(0, len(students), BATCH_SIZE):
                             batch = students[i:i+BATCH_SIZE]
                             tasks = []
@@ -217,10 +239,31 @@ async def notify_users(bot: Bot):
                                 )
                             
                             try:
-                                await asyncio.gather(*tasks, return_exceptions=True)
+                                results = await asyncio.gather(*tasks, return_exceptions=True)
+                                for j, result in enumerate(results):
+                                    telegram_id = batch[j][0]
+                                    if isinstance(result, Exception):
+                                        if "chat not found" in str(result) or "bot was blocked" in str(result).lower():
+                                            await mark_user_inactive(db_connection, telegram_id)
+                                            logger.warning(f"Пользователь {telegram_id} недоступен, помечен как неактивный")
+                                        else:
+                                            logger.error(f"Ошибка отправки {telegram_id}: {result}")
+                                    else:
+                                        await db_connection.execute(
+                                            '''INSERT INTO sent_notifications 
+                                            (notification_type, entity_id, user_id)
+                                            VALUES ('test', ?, ?)''',
+                                            (test_id, telegram_id)
+                                        )
+                                        success_sends += 1
+                                
+                                await db_connection.commit()
                                 await asyncio.sleep(DELAY_BETWEEN_BATCHES)
                             except Exception as e:
                                 logger.error(f"Ошибка при отправке батча напоминаний о тестах: {e}")
+                        
+                        if success_sends > 0:
+                            logger.info(f"Напоминание о тесте {test_id} отправлено {success_sends} пользователям")
                 
                 # 3. Проверка долгов (за 3 дня до крайнего срока) с batch-обработкой
                 debt_notification_date = today + timedelta(days=3)
@@ -235,6 +278,12 @@ async def notify_users(bot: Bot):
                     WHERE date(sd.last_date) = date(?)
                     AND s.telegram_id IS NOT NULL
                     AND s.is_active = 1
+                    AND NOT EXISTS (
+                        SELECT 1 FROM sent_notifications sn 
+                        WHERE sn.notification_type = 'debt' 
+                        AND sn.entity_date = sd.last_date
+                        AND sn.user_id = s.telegram_id
+                    )
                 ''', (debt_notification_date.strftime("%Y-%m-%d"),)) as cursor:
                     upcoming_debts = await cursor.fetchall()
                 
@@ -247,6 +296,7 @@ async def notify_users(bot: Bot):
                         debts_by_user[telegram_id].append((subject_name, debt_type, last_date))
                     
                     # Подготовка и отправка сообщений батчами
+                    success_sends = 0
                     user_ids = list(debts_by_user.keys())
                     for i in range(0, len(user_ids), BATCH_SIZE):
                         batch = user_ids[i:i+BATCH_SIZE]
@@ -270,14 +320,36 @@ async def notify_users(bot: Bot):
                             )
                         
                         try:
-                            await asyncio.gather(*tasks, return_exceptions=True)
+                            results = await asyncio.gather(*tasks, return_exceptions=True)
+                            for j, result in enumerate(results):
+                                telegram_id = batch[j]
+                                if isinstance(result, Exception):
+                                    if "chat not found" in str(result) or "bot was blocked" in str(result).lower():
+                                        await mark_user_inactive(db_connection, telegram_id)
+                                        logger.warning(f"Пользователь {telegram_id} недоступен, помечен как неактивный")
+                                    else:
+                                        logger.error(f"Ошибка отправки {telegram_id}: {result}")
+                                else:
+                                    for _, _, last_date in debts_by_user[telegram_id]:
+                                        await db_connection.execute(
+                                            '''INSERT INTO sent_notifications 
+                                            (notification_type, entity_date, user_id)
+                                            VALUES ('debt', ?, ?)''',
+                                            (last_date, telegram_id)
+                                        )
+                                    success_sends += 1
+                            
+                            await db_connection.commit()
                             await asyncio.sleep(DELAY_BETWEEN_BATCHES)
                         except Exception as e:
                             logger.error(f"Ошибка при отправке батча напоминаний о долгах: {e}")
+                    
+                    if success_sends > 0:
+                        logger.info(f"Напоминания о долгах отправлены {success_sends} пользователям")
                 
                 # 4. Проверка изменений в файлах расписания с batch-обработкой
                 for file_path in schedule_files:
-                    if await file_watcher.check_file_changes(file_path):
+                    if await file_watcher.check_file_changes(file_path) and not file_watcher.file_notification_sent:
                         logger.info(f"Обнаружено изменение в файле {file_path}")
                         
                         if "групп" in file_path:
@@ -301,6 +373,7 @@ async def notify_users(bot: Bot):
                                      f'Проверьте актуальное расписание в соответствующем разделе.')
                         
                         # Batch-обработка
+                        success_sends = 0
                         for i in range(0, len(users), BATCH_SIZE):
                             batch = users[i:i+BATCH_SIZE]
                             tasks = []
@@ -315,10 +388,26 @@ async def notify_users(bot: Bot):
                                 )
                             
                             try:
-                                await asyncio.gather(*tasks, return_exceptions=True)
+                                results = await asyncio.gather(*tasks, return_exceptions=True)
+                                for j, result in enumerate(results):
+                                    telegram_id = batch[j][0]
+                                    if isinstance(result, Exception):
+                                        if "chat not found" in str(result) or "bot was blocked" in str(result).lower():
+                                            await mark_user_inactive(db_connection, telegram_id)
+                                            logger.warning(f"Пользователь {telegram_id} недоступен, помечен как неактивный")
+                                        else:
+                                            logger.error(f"Ошибка отправки {telegram_id}: {result}")
+                                    else:
+                                        success_sends += 1
+                                
+                                await db_connection.commit()
                                 await asyncio.sleep(DELAY_BETWEEN_BATCHES)
                             except Exception as e:
                                 logger.error(f"Ошибка при отправке батча уведомлений о расписании: {e}")
+                        
+                        if success_sends > 0:
+                            file_watcher.file_notification_sent = True
+                            logger.info(f"Уведомление об изменении {file_path} отправлено {success_sends} пользователям")
                 
                 await asyncio.sleep(60)
                 

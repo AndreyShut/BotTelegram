@@ -23,8 +23,9 @@ class StudentBotDB:
                 connection.close()
 
     def create_database(self):
-        """Создание всех таблиц базы данных"""
-        queries = [
+        """Создание всех таблиц базы данных и индексов"""
+        # Создание таблиц
+        table_queries = [
             '''CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name_group TEXT NOT NULL UNIQUE
@@ -79,10 +80,11 @@ class StudentBotDB:
             )''',
             '''CREATE TABLE IF NOT EXISTS sent_notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                news_id INTEGER NOT NULL,
+                notification_type TEXT NOT NULL,  -- 'news', 'test', 'debt'
+                entity_id INTEGER,               -- ID новости/теста
+                entity_date TEXT,                -- Для долгов (last_date)
                 user_id INTEGER NOT NULL,
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (news_id) REFERENCES news(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES students(telegram_id) ON DELETE CASCADE
             )''',
             '''CREATE TABLE IF NOT EXISTS tests (
@@ -106,9 +108,46 @@ class StudentBotDB:
             )'''
         ]
         
-        for query in queries:
+        # Создание индексов
+        index_queries = [
+            # Индексы для таблицы students
+            'CREATE INDEX IF NOT EXISTS idx_students_telegram ON students(telegram_id)',
+            'CREATE INDEX IF NOT EXISTS idx_students_active ON students(is_active)',
+            'CREATE INDEX IF NOT EXISTS idx_students_group ON students(id_group)',
+            
+            # Индексы для таблицы tests
+            'CREATE INDEX IF NOT EXISTS idx_tests_date ON tests(date)',
+            'CREATE INDEX IF NOT EXISTS idx_tests_group ON tests(group_id)',
+            'CREATE INDEX IF NOT EXISTS idx_tests_discipline ON tests(discipline_id)',
+            
+            # Индексы для таблицы student_debts
+            'CREATE INDEX IF NOT EXISTS idx_debts_date ON student_debts(last_date)',
+            'CREATE INDEX IF NOT EXISTS idx_debts_student ON student_debts(student_id)',
+            'CREATE INDEX IF NOT EXISTS idx_debts_discipline ON student_debts(discipline_id)',
+            
+            # Индексы для таблицы sent_notifications
+            'CREATE INDEX IF NOT EXISTS idx_sent_notifications_user ON sent_notifications(user_id)',
+            'CREATE INDEX IF NOT EXISTS idx_sent_notifications_type ON sent_notifications(notification_type, entity_id)',
+            'CREATE INDEX IF NOT EXISTS idx_sent_notifications_date ON sent_notifications(entity_date)',
+            
+            # Индексы для таблицы disciplines
+            'CREATE INDEX IF NOT EXISTS idx_disciplines_subject ON disciplines(subject_id)',
+            'CREATE INDEX IF NOT EXISTS idx_disciplines_teacher ON disciplines(teacher_id)',
+            'CREATE INDEX IF NOT EXISTS idx_disciplines_group ON disciplines(group_id)'
+        ]
+
+        # Создаем таблицы
+        for query in table_queries:
             self._execute(query, commit=True)
             
+        # Создаем индексы
+        for query in index_queries:
+            try:
+                self._execute(query, commit=True)
+            except Exception as e:
+                print(f"Ошибка при создании индекса: {e}")
+                continue
+
 if __name__ == "__main__":
-    StudentBotDB()
-    
+    db = StudentBotDB()
+    print("База данных и индексы успешно созданы")

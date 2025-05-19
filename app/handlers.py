@@ -150,7 +150,7 @@ async def remove_telegram_binding(telegram_id: int) -> bool:
                 "DELETE FROM sent_notifications WHERE user_id = ?",
                 (telegram_id,))
             await conn.execute(
-                "UPDATE students SET telegram_id = NULL WHERE telegram_id = ?",
+                "UPDATE students SET telegram_id = NULL, is_active = 0 WHERE telegram_id = ?",
                 (telegram_id,))
             await conn.commit()
             return True
@@ -315,8 +315,18 @@ async def unbind(message: Message, state: FSMContext):
 
 @router.message(Command("logout"))
 async def logout(message: Message, state: FSMContext):
+    try:
+        async with db.get_connection() as conn:
+            await conn.execute(
+                "UPDATE students SET is_active = 0 WHERE telegram_id = ?",
+                (message.from_user.id,))
+            await conn.commit()
+    except Exception as e:
+        logger.error(f"Error marking user inactive: {e}")
+    
     await state.clear()
-    await message.answer("✅ Вы успешно вышли. Для входа используйте /start", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("✅ Вы успешно вышли. Для входа используйте /start", 
+                       reply_markup=types.ReplyKeyboardRemove())
 
 # ==================== ОБЩИЕ КОМАНДЫ ====================
 @router.message(F.text == "🔙 Назад в меню")
@@ -334,7 +344,7 @@ async def back_to_admin_menu(message: Message, state: FSMContext):
     await message.answer("🔐 Административное меню:", reply_markup=kb.admin_kb)
     await state.set_state(AuthStates.admin_mode)
 
-@router.message(F.text == "🔙 В главное меню")
+@router.message(F.text == "🔙 Назад в админку")
 async def back_to_root_menu(message: Message, state: FSMContext):
     data = await state.get_data()
     if data.get("is_admin"):
@@ -1323,13 +1333,15 @@ async def edit_student_status(message: Message, state: FSMContext):
         await cancel_command(message, state)
         return
         
-    text = message.text.strip()
-    if text not in ["0", "1"]:
-        await message.answer("📝 Введите 0 (неактивен) или 1 (активен)")
+    text = message.text.strip().lower()
+    if text not in ["активен", "неактивен", "1", "0"]:
+        await message.answer("📝 Введите 'активен' или 'неактивен' (или 1/0)")
         return
-    is_active = int(text)
+        
+    is_active = 1 if text in ["активен", "1"] else 0
     await state.update_data(is_active=is_active)
-    await message.answer("✅ Статус изменен", reply_markup=kb.edit_student_kb)
+    await message.answer(f"✅ Статус изменен на {'активен' if is_active else 'неактивен'}",
+                       reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.editing_description)
