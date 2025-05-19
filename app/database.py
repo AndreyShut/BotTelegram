@@ -93,6 +93,9 @@ class StudentBotDB:
                 discipline_id INTEGER NOT NULL,
                 test_link TEXT NOT NULL,
                 date TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP,
                 FOREIGN KEY (group_id) REFERENCES groups(id),
                 FOREIGN KEY (discipline_id) REFERENCES disciplines(id)
             )''',
@@ -101,6 +104,9 @@ class StudentBotDB:
                 discipline_id INTEGER NOT NULL,
                 debt_type_id INTEGER NOT NULL,
                 last_date TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP,
                 PRIMARY KEY (student_id, discipline_id, debt_type_id),
                 FOREIGN KEY (student_id) REFERENCES students(id_student),
                 FOREIGN KEY (discipline_id) REFERENCES disciplines(id),
@@ -136,6 +142,27 @@ class StudentBotDB:
             'CREATE INDEX IF NOT EXISTS idx_disciplines_group ON disciplines(group_id)'
         ]
 
+        # Триггеры для обновления временных меток
+        trigger_queries = [
+            '''CREATE TRIGGER IF NOT EXISTS update_test_timestamp
+            AFTER UPDATE ON tests
+            FOR EACH ROW
+            BEGIN
+                UPDATE tests SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+            END;''',
+            
+            '''CREATE TRIGGER IF NOT EXISTS update_debt_timestamp
+            AFTER UPDATE ON student_debts
+            FOR EACH ROW
+            BEGIN
+                UPDATE student_debts 
+                SET updated_at = CURRENT_TIMESTAMP 
+                WHERE student_id = OLD.student_id 
+                AND discipline_id = OLD.discipline_id 
+                AND debt_type_id = OLD.debt_type_id;
+            END;'''
+        ]
+
         # Создаем таблицы
         for query in table_queries:
             self._execute(query, commit=True)
@@ -146,7 +173,13 @@ class StudentBotDB:
                 self._execute(query, commit=True)
             except Exception as e:
                 print(f"Ошибка при создании индекса: {e}")
-                continue
+        
+        # Создаем триггеры
+        for query in trigger_queries:
+            try:
+                self._execute(query, commit=True)
+            except Exception as e:
+                print(f"Ошибка при создании триггера: {e}")
 
 if __name__ == "__main__":
     db = StudentBotDB()
