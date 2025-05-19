@@ -1,11 +1,11 @@
 from aiogram import Router, F, types
 from aiogram.types import Message, FSInputFile
-from aiogram.filters import CommandStart, Command
-from aiogram.fsm.state import State, StatesGroup, default_state
+from aiogram.filters import CommandStart, Command, StateFilter
+from aiogram.fsm.state import State, StatesGroup, default_state, any_state
 from aiogram.fsm.context import FSMContext
 import logging
 import app.keyboards as kb
-from app.db_manager import db
+from app.db_manager import db,pm
 from dotenv import load_dotenv
 import os
 from typing import Optional, Tuple, List
@@ -47,6 +47,8 @@ class AddTestStates(StatesGroup):
     waiting_teacher = State()
     waiting_link = State()
     waiting_date = State()
+    waiting_test_delete = State()      
+    confirm_test_delete = State() 
 add_test = AddTestStates
 
 class EditStudentFSM(StatesGroup):
@@ -80,6 +82,9 @@ class DebtFSM(StatesGroup):
     wait_add_type = State()
     wait_add_date = State()
     wait_del = State()
+
+class NewsGroupsFSM(StatesGroup):
+    waiting_for_group_ids = State()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 async def get_student_by_login(login: str) -> Optional[Tuple]:
@@ -161,6 +166,34 @@ async def is_admin(telegram_id: int) -> bool:
         logger.error(f"Error checking admin status: {e}")
         return False
 
+# ==================== ОБРАБОТЧИКИ ОТМЕНЫ ====================
+async def cancel_command(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    data = await state.get_data()
+    if current_state is None:
+        await message.answer("Нет активной команды для отмены.")
+        return
+    if data.get("is_admin"):
+        await message.answer("❌ Действие отменено.", reply_markup=kb.admin_kb)
+        await state.set_state(AuthStates.admin_mode)
+    else:
+        await message.answer("❌ Действие отменено.", reply_markup=kb.main)
+        await state.set_state(AuthStates.authorized)
+
+def add_cancel_to_states(cls):
+    for st in cls.__states__:
+        router.message(st, Command("cancel"))(cancel_command)
+        router.message(st, lambda m: m.text and m.text.lower() in ("отмена", "/отмена"))(cancel_command)
+    return cls
+add_cancel_to_states(AuthStates)
+add_cancel_to_states(StudentRegisterState)
+add_cancel_to_states(AddTestStates)
+add_cancel_to_states(EditStudentFSM)
+add_cancel_to_states(SubjectFSM)
+add_cancel_to_states(TeacherFSM)
+add_cancel_to_states(DebtFSM)
+add_cancel_to_states(NewsGroupsFSM)
+
 # ==================== КОМАНДЫ АУТЕНТИФИКАЦИИ ====================
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
@@ -209,7 +242,7 @@ async def process_password(message: Message, state: FSMContext):
         return
 
     student = await get_student_by_login(login)
-    if student and await db.verify_password(str(student[2]), password):
+    if student and await pm.verify_password(str(student[2]), password):
         if not student[4]:  # is_active
             await message.answer("Ваш аккаунт деактивирован. Обратитесь к администратору.")
             await state.clear()
@@ -271,8 +304,6 @@ async def back_to_root_menu(message: Message, state: FSMContext):
         await state.set_state(AuthStates.authorized)
 
 # ==================== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ====================
-from aiogram.types import FSInputFile
-
 @router.message(F.text == "📅 Расписание")
 async def show_schedule(message: Message):
     await message.answer("Выберите тип расписания:", reply_markup=kb.schedule_menu)
@@ -428,14 +459,11 @@ async def show_news(message: Message):
 @router.message(AuthStates.admin_mode, F.text == "📊 Управление тестами")
 async def manage_tests(message: Message, state: FSMContext):
     await message.answer(
-        "Что сделать с тестами?\n"
-        "/add_test – добавить тест\n"
-        "/list_tests – список тестов\n"
-        "/delete_test – удалить по ID", 
-        reply_markup=kb.admin_kb
+        "Выберите действие с тестами:",
+        reply_markup=kb.tests_admin_kb
     )
 
-@router.message(Command("add_test"))
+@router.message(AuthStates.admin_mode, F.text == "📝 Добавить тест")
 async def test_add_start(message: Message, state: FSMContext):
     # Список групп
     async with db.get_connection() as conn:
@@ -447,9 +475,9 @@ async def test_add_start(message: Message, state: FSMContext):
     await state.update_data(groups=groups)
     group_list = '\n'.join([f"{g[0]}: {g[1]}" for g in groups])
     await message.answer(f"Выберите ID группы теста:\n{group_list}")
-    await state.set_state(add_test.waiting_group)
+    await state.set_state(AddTestStates.waiting_group)
 
-@router.message(add_test.waiting_group)
+@router.message(AddTestStates.waiting_group)
 async def test_add_group(message: Message, state: FSMContext):
     try:
         group_id = int(message.text.strip())
@@ -474,9 +502,9 @@ async def test_add_group(message: Message, state: FSMContext):
         return
     subject_list = '\n'.join([f"{sid}: {sname}" for sid, sname in subjects])
     await message.answer(f"Выберите ID предмета:\n{subject_list}")
-    await state.set_state(add_test.waiting_subject)
+    await state.set_state(AddTestStates.waiting_subject)
 
-@router.message(add_test.waiting_subject)
+@router.message(AddTestStates.waiting_subject)
 async def test_add_subject(message: Message, state: FSMContext):
     try: subject_id = int(message.text.strip())
     except ValueError:
@@ -502,9 +530,9 @@ async def test_add_subject(message: Message, state: FSMContext):
         return
     teachers_str = '\n'.join([f"{tid}: {tname}" for tid, tname in teachers])
     await message.answer(f"Выберите ID преподавателя:\n{teachers_str}")
-    await state.set_state(add_test.waiting_teacher)
+    await state.set_state(AddTestStates.waiting_teacher)
 
-@router.message(add_test.waiting_teacher)
+@router.message(AddTestStates.waiting_teacher)
 async def test_add_teacher(message: Message, state: FSMContext):
     try: teacher_id = int(message.text.strip())
     except ValueError:
@@ -512,16 +540,16 @@ async def test_add_teacher(message: Message, state: FSMContext):
         return
     await state.update_data(teacher_id=teacher_id)
     await message.answer("Вставьте ссылку на тест:")
-    await state.set_state(add_test.waiting_link)
+    await state.set_state(AddTestStates.waiting_link)
 
-@router.message(add_test.waiting_link)
+@router.message(AddTestStates.waiting_link)
 async def test_add_link(message: Message, state: FSMContext):
     link = message.text.strip()
     await state.update_data(test_link=link)
     await message.answer("Введите дату теста (ГГГГ-ММ-ДД):")
-    await state.set_state(add_test.waiting_date)
+    await state.set_state(AddTestStates.waiting_date)
 
-@router.message(add_test.waiting_date)
+@router.message(AddTestStates.waiting_date)
 async def test_add_date(message: Message, state: FSMContext):
     date = message.text.strip()
     data = await state.get_data()
@@ -549,6 +577,121 @@ async def test_add_date(message: Message, state: FSMContext):
         await message.answer("❌ Не удалось добавить тест.")
     await state.set_state(AuthStates.admin_mode)
 
+@router.message(AuthStates.admin_mode, F.text == "📋 Список тестов")
+async def list_tests(message: Message):
+    try:
+        async with db.get_connection() as conn:
+            async with conn.execute('''
+                SELECT t.id, g.name_group, s.name, tch.full_name, t.date, t.test_link
+                FROM tests t
+                JOIN groups g ON t.group_id = g.id
+                JOIN disciplines d ON t.discipline_id = d.id
+                JOIN subjects s ON d.subject_id = s.id
+                JOIN teachers tch ON d.teacher_id = tch.id
+                ORDER BY t.date DESC
+                LIMIT 20
+            ''') as cursor:
+                tests = await cursor.fetchall()
+        
+        if not tests:
+            await message.answer("Тестов пока нет.")
+            return
+            
+        response = "📊 Список тестов:\n\n"
+        for test in tests:
+            test_id, group, subject, teacher, date, link = test
+            response += (
+                f"📌 ID: {test_id}\n"
+                f"👥 Группа: {group}\n"
+                f"📚 Предмет: {subject}\n"
+                f"👨‍🏫 Преподаватель: {teacher}\n"
+                f"📅 Дата: {date}\n"
+                f"🔗 Ссылка: {link}\n\n"
+            )
+        
+        await message.answer(response)
+    
+    except Exception as e:
+        logger.error(f"Error fetching tests list: {e}")
+        await message.answer("❌ Ошибка при получении списка тестов.")
+
+
+@router.message(AuthStates.admin_mode, F.text == "❌ Удалить")
+async def delete_test_start(message: Message, state: FSMContext):
+    # Получаем список тестов для выбора
+    try:
+        async with db.get_connection() as conn:
+            async with conn.execute('''
+                SELECT t.id, g.name_group, s.name, t.date 
+                FROM tests t
+                JOIN groups g ON t.group_id = g.id
+                JOIN disciplines d ON t.discipline_id = d.id
+                JOIN subjects s ON d.subject_id = s.id
+                ORDER BY t.date DESC
+                LIMIT 50
+            ''') as cursor:
+                tests = await cursor.fetchall()
+        
+        if not tests:
+            await message.answer("Тестов для удаления нет.")
+            return
+            
+        tests_list = "\n".join([f"{t[0]}: {t[1]} - {t[2]} ({t[3]})" for t in tests])
+        await message.answer (f"Введите ID теста для удаления:\n{tests_list}")
+            
+        await state.set_state(AddTestStates.waiting_test_delete)
+    
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка тестов: {e}")
+        await message.answer("❌ Ошибка при получении списка тестов.")
+
+@router.message(AddTestStates.waiting_test_delete)
+async def execute_delete_test(message: Message, state: FSMContext):
+    if message.text.lower() == "/cancel":
+        return
+    
+    try:
+        test_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("Пожалуйста, введите числовой ID теста")
+        return
+    
+    # Получаем информацию о тесте для подтверждения
+    try:
+        async with db.get_connection() as conn:
+            async with conn.execute('''
+                SELECT t.id, g.name_group, s.name, tch.full_name, t.date, t.test_link
+                FROM tests t
+                JOIN groups g ON t.group_id = g.id
+                JOIN disciplines d ON t.discipline_id = d.id
+                JOIN subjects s ON d.subject_id = s.id
+                JOIN teachers tch ON d.teacher_id = tch.id
+                WHERE t.id = ?
+            ''', (test_id,)) as cursor:
+                test = await cursor.fetchone()
+        
+        if not test:
+            await message.answer("Тест с указанным ID не найден.")
+            await state.set_state(AuthStates.admin_mode)
+            return
+            
+        async with db.get_connection() as conn:
+            await conn.execute("DELETE FROM tests WHERE id = ?", (test_id,))
+            await conn.commit()
+
+        await message.answer(
+            f"✅ Тест успешно удалён!\n"
+            f"Группа: {test[1]}\n"
+            f"Предмет: {test[2]}\n"
+            f"Дата: {test[4]}",
+            reply_markup=kb.admin_kb
+        )
+        await state.set_state(AuthStates.admin_mode)
+    
+    except Exception as e:
+        logger.error(f"Ошибка при получении информации о тесте: {e}")
+        await message.answer("❌ Ошибка при получении информации о тесте.")
+
 # ==================== УПРАВЛЕНИЕ НОВОСТЯМИ ====================
 @router.message(AuthStates.admin_mode, F.text == "📰 Управление новостями")
 async def manage_news(message: Message):
@@ -556,41 +699,57 @@ async def manage_news(message: Message):
 
 @router.message(AuthStates.admin_mode, F.text == "📝 Добавить новость")
 async def add_news_start(message: Message, state: FSMContext):
-    await message.answer("Введите заголовок новости (или /cancel для отмены):")
+    await message.answer("Введите заголовок новости:")
     await state.set_state(AuthStates.add_news_title)
 
 @router.message(AuthStates.add_news_title)
 async def add_news_title(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
     await state.update_data(title=message.text)
-    await message.answer("Введите описание новости (или /cancel для отмены):")
+    await message.answer("Введите описание новости:")
     await state.set_state(AuthStates.add_news_description)
 
 @router.message(AuthStates.add_news_description)
 async def add_news_description(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
     await state.update_data(description=message.text)
-    await message.answer("Введите дату новости в формате ГГГГ-ММ-ДД (или /cancel для отмены):")
+    await message.answer("Введите дату новости в формате ГГГГ-ММ-ДД:")
     await state.set_state(AuthStates.add_news_date)
 
 @router.message(AuthStates.add_news_date)
 async def add_news_date(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
     await state.update_data(date=message.text)
-    await message.answer("Введите место проведения (если есть) или /skip для пропуска (/cancel для отмены):")
+    await message.answer("Введите место проведения (если есть) или /skip для пропуска:")
     await state.set_state(AuthStates.add_news_place)
 
 @router.message(AuthStates.add_news_place, Command("skip"))
 async def skip_news_place(message: Message, state: FSMContext):
     await state.update_data(place=None)
-    await message.answer("Новость для всех групп? (да/нет) (/cancel для отмены)")
+    await message.answer("Новость для всех групп? (да/нет)")
     await state.set_state(AuthStates.add_news_groups)
 
 @router.message(AuthStates.add_news_place)
 async def add_news_place(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
     await state.update_data(place=message.text)
-    await message.answer("Новость для всех групп? (да/нет) (/cancel для отмены)")
+    await message.answer("Новость для всех групп? (да/нет)")
     await state.set_state(AuthStates.add_news_groups)
 
 @router.message(AuthStates.add_news_groups)
 async def add_news_groups(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     data = await state.get_data()
     for_all = message.text.lower() == "да"
     try:
@@ -608,7 +767,7 @@ async def add_news_groups(message: Message, state: FSMContext):
                     groups = await c.fetchall()
                 gr = '\n'.join(f"{g[0]}: {g[1]}" for g in groups)
                 await message.answer(f"Введите ID групп через запятую:\n{gr}")
-                await state.set_state("waiting_for_group_ids")
+                await state.set_state(NewsGroupsFSM.waiting_for_group_ids)
                 await conn.commit()  # Зафиксируем создание новости
                 return
             await conn.commit()
@@ -619,12 +778,17 @@ async def add_news_groups(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка при добавлении новости", reply_markup=kb.admin_kb)
         await state.set_state(AuthStates.admin_mode)
 
-# Добиваем состояние для id групп
-@router.message(State("waiting_for_group_ids"))
+@router.message(NewsGroupsFSM.waiting_for_group_ids)
 async def add_news_group_ids(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     data = await state.get_data()
     news_id = data["news_id"]
     group_ids = [int(x) for x in message.text.replace(" ", "").split(",") if x.isdigit()]
+
+        
     try:
         async with db.get_connection() as conn:
             await conn.executemany(
@@ -665,11 +829,15 @@ async def list_news(message: Message):
 
 @router.message(AuthStates.admin_mode, F.text == "📢 Опубликовать новость")
 async def publish_news_start(message: Message, state: FSMContext):
-    await message.answer("Введите ID новости для публикации (/cancel для отмены):")
+    await message.answer("Введите ID новости для публикации:")
     await state.set_state(AuthStates.publish_news)
 
 @router.message(AuthStates.publish_news)
 async def publish_news_execute(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         news_id = int(message.text)
         async with db.get_connection() as conn:
@@ -688,11 +856,15 @@ async def publish_news_execute(message: Message, state: FSMContext):
 
 @router.message(AuthStates.admin_mode, F.text == "❌ Удалить новость")
 async def delete_news_start(message: Message, state: FSMContext):
-    await message.answer("Введите ID новости для удаления (/cancel для отмены):")
+    await message.answer("Введите ID новости для удаления:")
     await state.set_state(AuthStates.delete_news)
 
 @router.message(AuthStates.delete_news)
 async def delete_news_execute(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         news_id = int(message.text)
         async with db.get_connection() as conn:
@@ -735,7 +907,7 @@ async def unbind_user_start(message: Message, state: FSMContext):
             user_id, login, tg_id, group = user
             response += f"👤 {login} (Группа: {group})\nID: {user_id} | TG: {tg_id}\n\n"
         
-        response += "\nВведите ID пользователя для отвязки или /all для отвязки всех (/cancel для отмены):"
+        response += "\nВведите ID пользователя для отвязки или /all для отвязки всех:"
         await message.answer(response)
         await state.set_state(AuthStates.unbind_user_select)
     
@@ -745,7 +917,7 @@ async def unbind_user_start(message: Message, state: FSMContext):
 
 @router.message(AuthStates.unbind_user_select, Command("all"))
 async def unbind_all_confirm(message: Message, state: FSMContext):
-    await message.answer("⚠️ Вы уверены, что хотите отвязать ВСЕХ пользователей? (да/нет) (/cancel для отмены)")
+    await message.answer("⚠️ Вы уверены, что хотите отвязать ВСЕХ пользователей? (да/нет)")
     await state.set_state(AuthStates.unbind_all_confirm)
 
 @router.message(AuthStates.unbind_all_confirm, F.text.lower() == "да")
@@ -768,6 +940,10 @@ async def unbind_all_execute(message: Message, state: FSMContext):
 
 @router.message(AuthStates.unbind_user_select)
 async def unbind_single_user(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         user_id = int(message.text)
         async with db.get_connection() as conn:
@@ -796,7 +972,7 @@ async def unbind_single_user(message: Message, state: FSMContext):
         await message.answer(f"✅ Пользователь с ID {user_id} успешно отвязан!", reply_markup=kb.admin_kb)
         await state.set_state(AuthStates.admin_mode)
     except ValueError:
-        await message.answer("❌ Введите корректный ID пользователя (число) или /all (/cancel для отмены)")
+        await message.answer("❌ Введите корректный ID пользователя (число) или /all")
     except Exception as e:
         logger.error(f"Error unbinding user: {e}")
         await message.answer("❌ Ошибка при отвязке пользователя", reply_markup=kb.admin_kb)
@@ -804,11 +980,15 @@ async def unbind_single_user(message: Message, state: FSMContext):
 
 @router.message(AuthStates.admin_mode, F.text == "👤 Добавить студента")
 async def add_student_start(message: Message, state: FSMContext):
-    await message.answer("Введите логин нового студента (/cancel для отмены):")
+    await message.answer("Введите логин нового студента:")
     await state.set_state(add_states.waiting_login)
 
 @router.message(add_states.waiting_login)
 async def add_student_login(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     login = message.text.strip()
     # Проверка уникальности логина
     async with db.get_connection() as conn:
@@ -823,6 +1003,10 @@ async def add_student_login(message: Message, state: FSMContext):
 
 @router.message(add_states.waiting_password)
 async def add_student_password(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     password = message.text.strip()
     await state.update_data(password=password)
     # Покажем список групп
@@ -835,6 +1019,10 @@ async def add_student_password(message: Message, state: FSMContext):
 
 @router.message(add_states.waiting_group)
 async def add_student_group(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         group_id = int(message.text.strip())
         async with db.get_connection() as conn:
@@ -858,6 +1046,10 @@ async def add_student_skip_desc(message: Message, state: FSMContext):
 
 @router.message(add_states.waiting_description)
 async def add_student_desc(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     await state.update_data(description=message.text)
     await finish_student_add(message, state)
 
@@ -865,12 +1057,12 @@ async def finish_student_add(message: Message, state: FSMContext):
     data = await state.get_data()
     # Вставляем в БД
     try:
-        password = await db.hash_password(data["password"])
+        hashed_password = await pm.hash_password(data["password"])
         async with db.get_connection() as conn:
             await conn.execute('''
                 INSERT INTO students (login, password, id_group, description) 
                 VALUES (?, ?, ?, ?)
-            ''', (data["login"], password, data["group_id"], data.get("description")))
+            ''', (data["login"], hashed_password, data["group_id"], data.get("description",None)))
             await conn.commit()
         await message.answer(f"✅ Студент {data['login']} добавлен.", reply_markup=kb.admin_kb)
     except Exception as e:
@@ -879,52 +1071,77 @@ async def finish_student_add(message: Message, state: FSMContext):
     await state.set_state(AuthStates.admin_mode)
 
 @router.message(AuthStates.admin_mode, F.text == "📋 Список студентов")
-async def list_students(message: Message):
+async def list_students(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             async with conn.execute('''
-                SELECT s.id_student, s.login, s.telegram_id, g.name_group, s.is_active 
+                SELECT s.id_student, s.login, g.name_group, s.is_active, s.telegram_id 
                 FROM students s
                 JOIN groups g ON s.id_group = g.id
-                ORDER BY g.name_group, s.login
+                ORDER BY s.id_student
             ''') as cursor:
                 students = await cursor.fetchall()
         
         if not students:
             await message.answer("🤷 Нет студентов в базе.")
             return
-            
-        response = "👥 Список студентов:\n\n"
-        for student in students:
-            student_id, login, tg_id, group, is_active = student
-            status = "✅ Активен" if is_active else "❌ Неактивен"
-            tg_status = f"TG: {tg_id}" if tg_id else "TG: не привязан"
-            response += f"👤 {login} (Группа: {group})\nID: {student_id} | {tg_status} | {status}\n\n"
         
-        await message.answer(response)
+        chunk_size = 70
+        for i in range(0, len(students), chunk_size):
+            chunk = students[i:i + chunk_size]
+            msg = ["👥 Список студентов:"] if i == 0 else []
+            
+            for student in chunk:
+                status = "✅ Активен" if student[3] else "❌ Неактивен"
+                tg_status = "✅ Привязан" if student[4] else "❌ Не привязан"
+                msg.append(f"{student[0]}: {student[1]} ({student[2]}) [{status}] [{tg_status}]")
+            
+            await message.answer("\n".join(msg))
     
     except Exception as e:
         logger.error(f"Error fetching students list: {e}")
         await message.answer("❌ Ошибка при получении списка студентов.")
 
+    await state.set_state(AuthStates.admin_mode)
+
 @router.message(AuthStates.admin_mode, F.text == "✏️ Редактировать студента")
 async def edit_student_start(message: Message, state: FSMContext):
     # список студентов
-    async with db.get_connection() as conn:
-        async with conn.execute("""
-            SELECT s.id_student, s.login, g.name_group, s.is_active
-            FROM students s
-            JOIN groups g ON s.id_group = g.id
-            ORDER BY s.id_student
-        """) as cur:
-            students = await cur.fetchall()
-    msg = "Выберите ID студента для редактирования:\n"
-    msg += "\n".join([f"{s[0]}: {s[1]} ({s[2]}) [{('Активен' if s[3] else 'Неактивен')}]" for s in students])
-    await message.answer(msg)
+    try:
+        async with db.get_connection() as conn:
+            async with conn.execute("""
+                SELECT s.id_student, s.login, g.name_group
+                FROM students s
+                JOIN groups g ON s.id_group = g.id
+                ORDER BY s.id_student
+            """) as cur:
+                students = await cur.fetchall()
+        
+        if not students:
+                await message.answer("🤷 Нет студентов в базе.")
+                return
+        
+        chunk_size = 70
+        for i in range(0, len(students), chunk_size):
+            chunk = students[i:i + chunk_size]
+            msg = ["👥 Список студентов:"] if i == 0 else []
+            
+            for student in chunk:
+                msg.append(f"{student[0]}: {student[1]} ({student[2]})")
+            await message.answer("\n".join(msg))
+
+    except Exception as e:
+        logger.error(f"Error fetching students list: {e}")
+        await message.answer("❌ Ошибка при получении списка студентов.")
+
     await state.set_state(edit_st.waiting_id)
 
 @router.message(edit_st.waiting_id)
 async def edit_student_select(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         student_id = int(message.text.strip())
     except ValueError:
@@ -960,59 +1177,73 @@ async def edit_student_select(message: Message, state: FSMContext):
     await message.answer(msg, reply_markup=kb.edit_student_kb, parse_mode="HTML")
     await state.set_state(edit_st.main_menu)
 
-@router.message(edit_st.main_menu)
-async def edit_student_options(message: Message, state: FSMContext):
-    text = message.text.lower()
-    edit_map = {
-        "логин": edit_st.editing_login,
-        "пароль": edit_st.editing_password,
-        "группа": edit_st.editing_group,
-        "статус": edit_st.editing_status,
-        "описание": edit_st.editing_description,
-        "сохранить": edit_st.confirm
-    }
-    # Выйти в меню
-    if "отмена" in text or "назад" in text:
-        await message.answer("Редактирование отменено.", reply_markup=kb.admin_kb)
-        await state.set_state(AuthStates.admin_mode)
-        return
-    for k, v in edit_map.items():
-        if k in text:
-            await state.set_state(v)
-            if v == edit_st.editing_login:
-                await message.answer("Введите новый логин:")
-            elif v == edit_st.editing_password:
-                await message.answer("Введите новый пароль:")
-            elif v == edit_st.editing_group:
-                async with db.get_connection() as conn:
-                    async with conn.execute("SELECT id,name_group FROM groups") as cur:
-                        groups = await cur.fetchall()
-                gr = '\n'.join(f"{gid}:{gname}" for gid, gname in groups)
-                await message.answer(f"Выберите ID группы:\n{gr}")
-            elif v == edit_st.editing_status:
-                await message.answer("Введите новый статус (1 для активен, 0 для неактивен):")
-            elif v == edit_st.editing_description:
-                await message.answer("Введите новое описание:")
-            elif v == edit_st.confirm:
-                await edit_student_save(message, state)
-            return
-    await message.answer("Выберите действие через кнопки.", reply_markup=kb.edit_student_kb)
+# ==================== РЕДАКТИРОВАНИЕ СТУДЕНТА ====================
+@router.message(edit_st.main_menu, F.text == "👤 Логин")
+async def edit_student_login_btn(message: Message, state: FSMContext):
+    await message.answer("Введите новый логин:")
+    await state.set_state(edit_st.editing_login)
+
+@router.message(edit_st.main_menu, F.text == "🔗 Пароль")
+async def edit_student_password_btn(message: Message, state: FSMContext):
+    await message.answer("Введите новый пароль:")
+    await state.set_state(edit_st.editing_password)
+
+@router.message(edit_st.main_menu, F.text == "👥 Группа")
+async def edit_student_group_btn(message: Message, state: FSMContext):
+    async with db.get_connection() as conn:
+        async with conn.execute("SELECT id,name_group FROM groups") as cur:
+            groups = await cur.fetchall()
+    gr = '\n'.join(f"{gid}: {gname}" for gid, gname in groups)
+    await message.answer(f"Выберите ID группы:\n{gr}")
+    await state.set_state(edit_st.editing_group)
+
+@router.message(edit_st.main_menu, F.text == "⏳ Статус")
+async def edit_student_status_btn(message: Message, state: FSMContext):
+    await message.answer("Выберите статус:")
+    await state.set_state(edit_st.editing_status)
+
+@router.message(edit_st.main_menu, F.text == "ℹ️ Описание")
+async def edit_student_description_btn(message: Message, state: FSMContext):
+    await message.answer("Введите новое описание:")
+    await state.set_state(edit_st.editing_description)
+
+@router.message(edit_st.main_menu, F.text == "✅ Сохранить")
+async def edit_student_save_btn(message: Message, state: FSMContext):
+    await edit_student_save(message, state)
+
+@router.message(edit_st.main_menu, F.text == "❌ Отмена")
+async def edit_student_cancel_btn(message: Message, state: FSMContext):
+    await message.answer("Редактирование отменено.", reply_markup=kb.admin_kb)
+    await state.set_state(AuthStates.admin_mode)
+
 
 @router.message(edit_st.editing_login)
 async def edit_student_login(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     await state.update_data(login=message.text.strip())
-    await message.answer("Логин изменен. Дальше?", reply_markup=kb.edit_student_kb)
+    await message.answer("✅ Логин изменен.", reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.editing_password)
 async def edit_student_password(message: Message, state: FSMContext):
-    password = await db.hash_password(message.text.strip())
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
+    password = await pm.hash_password(message.text.strip())
     await state.update_data(password=password)
-    await message.answer("Пароль изменен. Дальше?", reply_markup=kb.edit_student_kb)
+    await message.answer("✅ Пароль изменен.", reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.editing_group)
 async def edit_student_group(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         group_id = int(message.text.strip())
         # Проверить корректность
@@ -1026,24 +1257,32 @@ async def edit_student_group(message: Message, state: FSMContext):
         await message.answer("ID группы только число!")
         return
     await state.update_data(id_group=group_id, group_name=group[0])
-    await message.answer("Группа изменена. Дальше?", reply_markup=kb.edit_student_kb)
+    await message.answer("✅ Группа изменена.", reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.editing_status)
 async def edit_student_status(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     text = message.text.strip()
     if text not in ["0", "1"]:
         await message.answer("Введите 0 (неактивен) или 1 (активен).")
         return
     is_active = int(text)
     await state.update_data(is_active=is_active)
-    await message.answer("Статус изменен. Дальше?", reply_markup=kb.edit_student_kb)
+    await message.answer("✅ Статус изменен", reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.editing_description)
 async def edit_student_description(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     await state.update_data(description=message.text.strip())
-    await message.answer("Описание изменено. Дальше?", reply_markup=kb.edit_student_kb)
+    await message.answer("✅ Описание изменено.", reply_markup=kb.edit_student_kb)
     await state.set_state(edit_st.main_menu)
 
 @router.message(edit_st.confirm)
@@ -1064,13 +1303,19 @@ async def edit_student_save(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка обновления!")
     await state.set_state(AuthStates.admin_mode)
 
+
+
 @router.message(AuthStates.admin_mode, F.text == "❌ Удалить студента")
 async def delete_student_start(message: Message, state: FSMContext):
-    await message.answer("Введите ID студента для удаления (/cancel для отмены):")
+    await message.answer("Введите ID студента для удаления:")
     await state.set_state(AuthStates.delete_student)
 
 @router.message(AuthStates.delete_student)
 async def delete_student_process(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         student_id = int(message.text)
         async with db.get_connection() as conn:
@@ -1084,6 +1329,7 @@ async def delete_student_process(message: Message, state: FSMContext):
         logger.error(f"Error deleting student: {e}")
         await message.answer("❌ Ошибка при удалении студента", reply_markup=kb.admin_kb)
         await state.set_state(AuthStates.admin_mode)
+
 # ==================== Управление предметами ====================
 
 @router.message(AuthStates.admin_mode, F.text == "📚 Управление предметами")
@@ -1096,11 +1342,14 @@ async def manage_subjects(message: Message, state: FSMContext):
 
 @router.message(SubjectFSM.choose_action)
 async def subject_action(message: Message, state: FSMContext):
-    txt = message.text.lower()
-    if "добавить" in txt:
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
+    if message.text == "📝 Добавить предмет":
         await message.answer("Введите название предмета:")
         await state.set_state(SubjectFSM.wait_name)
-    elif "список" in txt:
+    elif message.text == "📋 Список предметов":
         async with db.get_connection() as conn:
             async with conn.execute("SELECT id, name FROM subjects ORDER BY name") as cur:
                 subs = await cur.fetchall()
@@ -1109,7 +1358,7 @@ async def subject_action(message: Message, state: FSMContext):
             "\n".join([f"{x[0]}: {x[1]}" for x in subs]),
             reply_markup=kb.subjects_admin_kb
         )
-    elif "удалить" in txt:
+    elif message.text == "❌ Удалить предмет":
         async with db.get_connection() as conn:
             async with conn.execute("SELECT id, name FROM subjects ORDER BY name") as cur:
                 subs = await cur.fetchall()
@@ -1117,7 +1366,7 @@ async def subject_action(message: Message, state: FSMContext):
             "\n".join([f"{x[0]}: {x[1]}" for x in subs])
         )
         await state.set_state(SubjectFSM.wait_id)
-    elif "редактировать" in txt:
+    elif message.text == "✏️ Редактировать предмет":
         async with db.get_connection() as conn:
             async with conn.execute("SELECT id, name FROM subjects ORDER BY name") as cur:
                 subs = await cur.fetchall()
@@ -1125,7 +1374,7 @@ async def subject_action(message: Message, state: FSMContext):
             "\n".join([f"{x[0]}: {x[1]}" for x in subs])
         )
         await state.set_state(SubjectFSM.wait_id)
-    elif "назад" in txt:
+    elif message.text == "🔙 Назад в админку":
         await message.answer("Админ-меню", reply_markup=kb.admin_kb)
         await state.set_state(AuthStates.admin_mode)
     else:
@@ -1133,6 +1382,10 @@ async def subject_action(message: Message, state: FSMContext):
 
 @router.message(SubjectFSM.wait_name)
 async def subject_add(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     name = message.text.strip()
     try:
         async with db.get_connection() as conn:
@@ -1146,17 +1399,19 @@ async def subject_add(message: Message, state: FSMContext):
 
 @router.message(SubjectFSM.wait_id)
 async def subject_edit_delete(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         subj_id = int(message.text.strip())
     except ValueError:
         await message.answer("ID должно быть числом.")
         return
-    txt = (await state.get_state())
-    if txt.endswith("wait_id"):
-        # запоминаем id
-        await state.update_data(subj_id=subj_id)
-        await message.answer("Введите новое название предмета или /del для удаления:")
-        await state.set_state(SubjectFSM.wait_edit_new_name)
+        
+    await state.update_data(subj_id=subj_id)
+    await message.answer("Введите новое название предмета или /del для удаления:")
+    await state.set_state(SubjectFSM.wait_edit_new_name)
 
 @router.message(SubjectFSM.wait_edit_new_name, Command("del"))
 async def subject_del(message: Message, state: FSMContext):
@@ -1173,6 +1428,10 @@ async def subject_del(message: Message, state: FSMContext):
 
 @router.message(SubjectFSM.wait_edit_new_name)
 async def subject_edit_name(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     new_name = message.text.strip()
     subj_id = (await state.get_data()).get("subj_id")
     try:
@@ -1195,34 +1454,21 @@ async def manage_teachers(message: Message, state: FSMContext):
     )
     await state.set_state(TeacherFSM.choose_action)
 
-@router.message(TeacherFSM.choose_action)
-async def teacher_action(message: Message, state: FSMContext):
-    txt = message.text.lower()
-    if "добавить" in txt:
-        await message.answer("Введите ФИО преподавателя:")
-        await state.set_state(TeacherFSM.wait_name)
-    elif "список" in txt:
-        async with db.get_connection() as conn:
-            async with conn.execute("SELECT id, full_name FROM teachers ORDER BY full_name") as cur:
-                ts = await cur.fetchall()
-        await message.answer(
-            "👨‍🏫 Преподаватели:\n" +
-            "\n".join([f"{x[0]}: {x[1]}" for x in ts]),
-            reply_markup=kb.teachers_admin_kb
-        )
-    elif "удалить" in txt or "редактировать" in txt:
-        async with db.get_connection() as conn:
-            async with conn.execute("SELECT id, full_name FROM teachers ORDER BY full_name") as cur:
-                ts = await cur.fetchall()
-        await message.answer("Введите ID преподавателя:\n" +
-            "\n".join([f"{x[0]}: {x[1]}" for x in ts])
-        )
-        await state.set_state(TeacherFSM.wait_id)
-    elif "назад" in txt:
-        await message.answer("Админ-меню", reply_markup=kb.admin_kb)
-        await state.set_state(AuthStates.admin_mode)
-    else:
-        await message.answer("Выберите действие через кнопки.", reply_markup=kb.teachers_admin_kb)
+@router.message(TeacherFSM.choose_action, F.text == "📋 Список преподавателей")
+async def teacher_list(message: Message, state: FSMContext):
+    async with db.get_connection() as conn:
+        async with conn.execute("SELECT id, full_name FROM teachers ORDER BY full_name") as cur:
+            ts = await cur.fetchall()
+    await message.answer(
+        "👨‍🏫 Преподаватели:\n" +
+        "\n".join([f"{x[0]}: {x[1]}" for x in ts]),
+        reply_markup=kb.teachers_admin_kb
+    )
+
+@router.message(TeacherFSM.choose_action, F.text == "📝 Добавить преподавателя")
+async def teacher_add_prompt(message: Message, state: FSMContext):
+    await message.answer("Введите ФИО преподавателя:")
+    await state.set_state(TeacherFSM.wait_name)
 
 @router.message(TeacherFSM.wait_name)
 async def teacher_add(message: Message, state: FSMContext):
@@ -1231,37 +1477,58 @@ async def teacher_add(message: Message, state: FSMContext):
         async with db.get_connection() as conn:
             await conn.execute("INSERT INTO teachers (full_name) VALUES (?)", (name,))
             await conn.commit()
-        await message.answer(f"✅ Преподаватель \"{name}\" добавлен", reply_markup=kb.teachers_admin_kb)
+        await message.answer(
+            f"✅ Преподаватель \"{name}\" добавлен",
+            reply_markup=kb.teachers_admin_kb
+        )
     except Exception as e:
         logger.error(f"Ошибка добавления: {e}")
-        await message.answer("❌ Ошибка добавления.")
+        await message.answer("❌ Ошибка добавления.", reply_markup=kb.teachers_admin_kb)
     await state.set_state(TeacherFSM.choose_action)
 
+@router.message(TeacherFSM.choose_action, F.text.in_(["✏️ Редактировать преподавателя", "❌ Удалить преподавателя"]))
+async def teacher_edit_delete_prompt(message: Message, state: FSMContext):
+    action = "edit" if message.text == "✏️ Редактировать преподавателя" else "delete"
+    await state.update_data(action=action)
+    
+    async with db.get_connection() as conn:
+        async with conn.execute("SELECT id, full_name FROM teachers ORDER BY full_name") as cur:
+            ts = await cur.fetchall()
+    
+    await message.answer(
+        f"Введите ID преподавателя для {'редактирования' if action == 'edit' else 'удаления'}:\n" +
+        "\n".join([f"{x[0]}: {x[1]}" for x in ts])
+    )
+    await state.set_state(TeacherFSM.wait_id)
+
 @router.message(TeacherFSM.wait_id)
-async def teacher_edit_delete(message: Message, state: FSMContext):
+async def teacher_process_id(message: Message, state: FSMContext):
     try:
         teacher_id = int(message.text.strip())
     except ValueError:
         await message.answer("ID должно быть числом.")
         return
-    await state.update_data(teacher_id=teacher_id)
-    await message.answer("Введите новое ФИО преподавателя или /del для удаления:")
+        
+    data = await state.get_data()
+    action = data.get("action")
+    
+    if action == "edit":
+        await state.update_data(teacher_id=teacher_id)
+        await message.answer("Введите новое ФИО преподавателя:")
+        await state.set_state(TeacherFSM.wait_new_name)
+    elif action == "delete":
+        try:
+            async with db.get_connection() as conn:
+                await conn.execute("DELETE FROM teachers WHERE id = ?", (teacher_id,))
+                await conn.commit()
+            await message.answer("🗑️ Преподаватель удален.", reply_markup=kb.teachers_admin_kb)
+        except Exception as e:
+            logger.error(f"Ошибка удаления преподавателя: {e}")
+            await message.answer("❌ Ошибка удаления.", reply_markup=kb.teachers_admin_kb)
+        await state.set_state(TeacherFSM.choose_action)
 
-@router.message(TeacherFSM.wait_id, Command("del"))
-async def teacher_del(message: Message, state: FSMContext):
-    teacher_id = (await state.get_data()).get("teacher_id")
-    try:
-        async with db.get_connection() as conn:
-            await conn.execute("DELETE FROM teachers WHERE id = ?", (teacher_id,))
-            await conn.commit()
-        await message.answer("🗑️ Преподаватель удален.", reply_markup=kb.teachers_admin_kb)
-    except Exception as e:
-        logger.error(f"Ошибка удаления преподавателя: {e}")
-        await message.answer("❌ Ошибка удаления.")
-    await state.set_state(TeacherFSM.choose_action)
-
-@router.message(TeacherFSM.wait_id)
-async def teacher_edit_name(message: Message, state: FSMContext):
+@router.message(TeacherFSM.wait_new_name)
+async def teacher_update_name(message: Message, state: FSMContext):
     new_name = message.text.strip()
     teacher_id = (await state.get_data()).get("teacher_id")
     try:
@@ -1271,11 +1538,15 @@ async def teacher_edit_name(message: Message, state: FSMContext):
         await message.answer("✅ Имя преподавателя изменено.", reply_markup=kb.teachers_admin_kb)
     except Exception as e:
         logger.error(f"Ошибка изменения преподавателя: {e}")
-        await message.answer("❌ Не удалось изменить.")
+        await message.answer("❌ Не удалось изменить.", reply_markup=kb.teachers_admin_kb)
     await state.set_state(TeacherFSM.choose_action)
 
-# ==================== Управление долгами ====================
+@router.message(TeacherFSM.choose_action, F.text == "🔙 Назад в админку")
+async def teacher_back(message: Message, state: FSMContext):
+    await message.answer("Админ-меню", reply_markup=kb.admin_kb)
+    await state.set_state(AuthStates.admin_mode)
 
+# ==================== Управление долгами ====================
 
 @router.message(AuthStates.admin_mode, F.text == "⏳ Управление долгами")
 async def manage_debts(message: Message, state: FSMContext):
@@ -1285,61 +1556,225 @@ async def manage_debts(message: Message, state: FSMContext):
     )
     await state.set_state(DebtFSM.choose_action)
 
-@router.message(DebtFSM.choose_action)
-async def debt_action(message: Message, state: FSMContext):
-    txt = message.text.lower()
-    if "список" in txt:
+@router.message(DebtFSM.choose_action, F.text == "📋 Список долгов")
+async def debt_list(message: Message, state: FSMContext):
+    async with db.get_connection() as conn:
+        async with conn.execute("""
+            SELECT s.id_student, s.login, subj.name, dt.name, sd.last_date
+            FROM student_debts sd
+            JOIN students s ON sd.student_id = s.id_student
+            JOIN disciplines d ON sd.discipline_id = d.id
+            JOIN subjects subj ON d.subject_id = subj.id
+            JOIN debt_types dt ON sd.debt_type_id = dt.id
+            ORDER BY s.id_student
+        """) as cur:
+            debts = await cur.fetchall()
+    msg = "Задолженности студентов\n"
+    for st in debts:
+        msg += f"{st[0]}: {st[1]} по {st[2]} ({st[3]}) - до {st[4]}\n"
+    await message.answer(msg)
+
+@router.message(DebtFSM.choose_action, F.text == "📝 Добавить долг")
+async def debt_add(message: Message, state: FSMContext):
+    # Выбор студента
+    async with db.get_connection() as conn:
+        async with conn.execute("SELECT id_student, login FROM students ORDER BY login") as cur:
+            studs = await cur.fetchall()
+    await message.answer("Выберите ID студента:\n" + "\n".join([f"{s[0]}: {s[1]}" for s in studs]))
+    await state.set_state(DebtFSM.wait_student)
+
+@router.message(DebtFSM.choose_action, F.text == "✏️ Редактировать долг")
+async def debt_edit_start(message: Message, state: FSMContext):
+    async with db.get_connection() as conn:
+        async with conn.execute("""
+            SELECT sd.id, s.id_student, s.login, subj.name, dt.name, sd.last_date
+            FROM student_debts sd
+            JOIN students s ON sd.student_id = s.id_student
+            JOIN disciplines d ON sd.discipline_id = d.id
+            JOIN subjects subj ON d.subject_id = subj.id
+            JOIN debt_types dt ON sd.debt_type_id = dt.id
+            ORDER BY s.id_student
+        """) as cur:
+            debts = await cur.fetchall()
+    
+    if not debts:
+        await message.answer("Нет долгов для редактирования.")
+        return
+    
+    await message.answer(
+        "Выберите ID долга для редактирования:\n" +
+        "\n".join([f"{d[0]}: {d[2]} - {d[3]} ({d[4]}) до {d[5]}" for d in debts])
+    )
+    await state.set_state(DebtFSM.wait_edit_id)
+
+@router.message(DebtFSM.wait_edit_id)
+async def debt_edit_choose(message: Message, state: FSMContext):
+    try:
+        debt_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите числовой ID долга")
+        return
+    
+    await state.update_data(debt_id=debt_id)
+    await message.answer(
+        "Что изменить?\n"
+        "1. Дисциплину\n"
+        "2. Тип долга\n"
+        "3. Крайний срок\n"
+        "Введите номер пункта:"
+    )
+    await state.set_state(DebtFSM.wait_edit_field)
+
+@router.message(DebtFSM.wait_edit_field)
+async def debt_edit_field(message: Message, state: FSMContext):
+    field_map = {
+        "1": "discipline",
+        "2": "type",
+        "3": "date"
+    }
+    
+    choice = message.text.strip()
+    if choice not in field_map:
+        await message.answer("Введите номер от 1 до 3")
+        return
+    
+    field = field_map[choice]
+    await state.update_data(edit_field=field)
+    
+    data = await state.get_data()
+    
+    if field == "discipline":
         async with db.get_connection() as conn:
             async with conn.execute("""
-                SELECT s.id_student, s.login, subj.name, dt.name, sd.last_date
-                FROM student_debts sd
-                JOIN students s ON sd.student_id = s.id_student
-                JOIN disciplines d ON sd.discipline_id = d.id
-                JOIN subjects subj ON d.subject_id = subj.id
-                JOIN debt_types dt ON sd.debt_type_id = dt.id
-                ORDER BY s.id_student
-            """) as cur:
-                debts = await cur.fetchall()
-        msg = "Задолженности студентов\n"
-        for st in debts:
-            msg += f"{st[0]}: {st[1]} по {st[2]} ({st[3]}) - до {st[4]}\n"
-        await message.answer(msg)
-    elif "добавить" in txt:
-        # Выбор студента
-        async with db.get_connection() as conn:
-            async with conn.execute("SELECT id_student, login FROM students ORDER BY login") as cur:
-                studs = await cur.fetchall()
-        await message.answer("Выберите ID студента:\n" + "\n".join([f"{s[0]}: {s[1]}" for s in studs]))
-        await state.set_state(DebtFSM.wait_student)
-    elif "удалить" in txt:
-        async with db.get_connection() as conn:
-            async with conn.execute("""
-                SELECT s.id_student, s.login, subj.name, dt.name, sd.last_date
-                FROM student_debts sd
-                JOIN students s ON sd.student_id = s.id_student
-                JOIN disciplines d ON sd.discipline_id = d.id
-                JOIN subjects subj ON d.subject_id = subj.id
-                JOIN debt_types dt ON sd.debt_type_id = dt.id
-                ORDER BY s.id_student
-            """) as cur:
-                debts = await cur.fetchall()
-        await message.answer("Введите ID студента/предмета/типа долга через запятую (id_student, discipline_id, debt_type_id) для удаления:\n" +
-            "\n".join([f"{x[0]}|{x[2]}|{x[3]}" for x in debts])
+                SELECT d.id, s.name, t.full_name
+                FROM disciplines d
+                JOIN subjects s ON d.subject_id = s.id
+                JOIN teachers t ON d.teacher_id = t.id
+                JOIN student_debts sd ON sd.discipline_id = d.id
+                WHERE sd.id = ?
+            """, (data["debt_id"],)) as cur:
+                current = await cur.fetchone()
+            
+            async with conn.execute("SELECT id, name FROM subjects") as cur:
+                subjects = await cur.fetchall()
+        
+        await message.answer(
+            f"Текущая дисциплина: {current[1]} ({current[2]})\n"
+            "Выберите новую дисциплину (ID):\n" +
+            "\n".join([f"{s[0]}: {s[1]}" for s in subjects])
         )
-        await state.set_state(DebtFSM.wait_del)
-    elif "назад" in txt:
-        await message.answer("Админ-меню", reply_markup=kb.admin_kb)
-        await state.set_state(AuthStates.admin_mode)
-    else:
-        await message.answer("Выберите действие через кнопки.", reply_markup=kb.debts_admin_kb)
+        await state.set_state(DebtFSM.wait_edit_value)
+    
+    elif field == "type":
+        async with db.get_connection() as conn:
+            async with conn.execute("""
+                SELECT dt.id, dt.name
+                FROM debt_types dt
+                JOIN student_debts sd ON sd.debt_type_id = dt.id
+                WHERE sd.id = ?
+            """, (data["debt_id"],)) as cur:
+                current = await cur.fetchone()
+            
+            async with conn.execute("SELECT id, name FROM debt_types") as cur:
+                types = await cur.fetchall()
+        
+        await message.answer(
+            f"Текущий тип: {current[1]}\n"
+            "Выберите новый тип (ID):\n" +
+            "\n".join([f"{t[0]}: {t[1]}" for t in types])
+        )
+        await state.set_state(DebtFSM.wait_edit_value)
+    
+    elif field == "date":
+        await message.answer("Введите новую дату (ГГГГ-ММ-ДД):")
+        await state.set_state(DebtFSM.wait_edit_value)
+
+@router.message(DebtFSM.wait_edit_value)
+async def debt_edit_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    value = message.text.strip()
+    
+    try:
+        async with db.get_connection() as conn:
+            if data["edit_field"] == "discipline":
+                await conn.execute(
+                    "UPDATE student_debts SET discipline_id = ? WHERE id = ?",
+                    (int(value), data["debt_id"])
+                )
+            elif data["edit_field"] == "type":
+                await conn.execute(
+                    "UPDATE student_debts SET debt_type_id = ? WHERE id = ?",
+                    (int(value), data["debt_id"])
+                )
+            elif data["edit_field"] == "date":
+                await conn.execute(
+                    "UPDATE student_debts SET last_date = ? WHERE id = ?",
+                    (value, data["debt_id"])
+                )
+            
+            await conn.commit()
+        await message.answer("✅ Долг обновлен.", reply_markup=kb.debts_admin_kb)
+    except Exception as e:
+        logger.error(f"Ошибка обновления долга: {e}")
+        await message.answer("❌ Ошибка при обновлении.")
+    
+    await state.set_state(DebtFSM.choose_action)
+
+@router.message(DebtFSM.choose_action, F.text == "❌ Удалить долг")
+async def debt_delete_start(message: Message, state: FSMContext):
+    async with db.get_connection() as conn:
+        async with conn.execute("""
+            SELECT sd.id, s.id_student, s.login, subj.name, dt.name, sd.last_date
+            FROM student_debts sd
+            JOIN students s ON sd.student_id = s.id_student
+            JOIN disciplines d ON sd.discipline_id = d.id
+            JOIN subjects subj ON d.subject_id = subj.id
+            JOIN debt_types dt ON sd.debt_type_id = dt.id
+            ORDER BY s.id_student
+        """) as cur:
+            debts = await cur.fetchall()
+    
+    await message.answer(
+        "Введите ID долга для удаления:\n" +
+        "\n".join([f"{d[0]}: {d[2]} - {d[3]} ({d[4]}) до {d[5]}" for d in debts])
+    )
+    await state.set_state(DebtFSM.wait_del)
+
+@router.message(DebtFSM.wait_del)
+async def debt_delete(message: Message, state: FSMContext):
+    try:
+        debt_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите числовой ID долга")
+        return
+        
+    try:
+        async with db.get_connection() as conn:
+            await conn.execute("DELETE FROM student_debts WHERE id = ?", (debt_id,))
+            await conn.commit()
+        await message.answer("🗑️ Долг удален.", reply_markup=kb.debts_admin_kb)
+    except Exception as e:
+        logger.error(f"Ошибка удаления долга: {e}")
+        await message.answer("❌ Ошибка при удалении.")
+    await state.set_state(DebtFSM.choose_action)
+
+@router.message(DebtFSM.choose_action, F.text == "🔙 Назад в админку")
+async def debt_back(message: Message, state: FSMContext):
+    await message.answer("Админ-меню", reply_markup=kb.admin_kb)
+    await state.set_state(AuthStates.admin_mode)
 
 @router.message(DebtFSM.wait_student)
 async def debt_choose_student(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         student_id = int(message.text.strip())
     except ValueError:
         await message.answer("Только ID числа")
         return
+        
     await state.update_data(student_id=student_id)
     # Список дисциплин студента
     async with db.get_connection() as conn:
@@ -1363,11 +1798,16 @@ async def debt_choose_student(message: Message, state: FSMContext):
 
 @router.message(DebtFSM.wait_add_disc)
 async def debt_choose_disc(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         discipline_id = int(message.text.strip())
     except ValueError:
         await message.answer("Только ID числа")
         return
+        
     await state.update_data(discipline_id=discipline_id)
     # виды долгов
     async with db.get_connection() as conn:
@@ -1378,17 +1818,26 @@ async def debt_choose_disc(message: Message, state: FSMContext):
 
 @router.message(DebtFSM.wait_add_type)
 async def debt_choose_type(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     try:
         debt_type_id = int(message.text.strip())
     except ValueError:
         await message.answer("ID только число")
         return
+        
     await state.update_data(debt_type_id=debt_type_id)
     await message.answer("Крайний срок (ГГГГ-ММ-ДД):")
     await state.set_state(DebtFSM.wait_add_date)
 
 @router.message(DebtFSM.wait_add_date)
 async def debt_choose_date(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     date = message.text.strip()
     data = await state.get_data()
     try:
@@ -1405,11 +1854,21 @@ async def debt_choose_date(message: Message, state: FSMContext):
 
 @router.message(DebtFSM.wait_del)
 async def debt_delete(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await cancel_command(message, state)
+        return
+        
     txt = message.text.strip().split(",")
     if len(txt) < 3:
         await message.answer("Введите три числа через запятую.")
         return
-    student_id, discipline_id, debt_type_id = txt[:3]
+        
+    try:
+        student_id, discipline_id, debt_type_id = [int(x.strip()) for x in txt[:3]]
+    except ValueError:
+        await message.answer("Введите числовые ID через запятую")
+        return
+        
     try:
         async with db.get_connection() as conn:
             await conn.execute("""
@@ -1421,25 +1880,6 @@ async def debt_delete(message: Message, state: FSMContext):
         logger.error(f"Ошибка удаления долга: {e}")
         await message.answer("❌ Ошибка при удалении.")
     await state.set_state(DebtFSM.choose_action)
-
-# ==================== ОБРАБОТЧИКИ ОТМЕНЫ ====================
-@router.message(Command("cancel"))
-async def cancel_command(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state is None:
-        await message.answer("Нет активной команды для отмены.")
-        return
-    data = await state.get_data()
-    if data.get("is_admin"):
-        await message.answer("❌ Действие отменено.", reply_markup=kb.admin_kb)
-        await state.set_state(AuthStates.admin_mode)
-    else:
-        await message.answer("❌ Действие отменено.", reply_markup=kb.main)
-        await state.set_state(AuthStates.authorized)
-
-# Добавляем возможность отмены во все состояния
-for state in AuthStates.__states__:
-    router.message(state, Command("cancel"))(cancel_command)
 
 # ==================== СПРАВКА ====================
 @router.message(Command("help"))
@@ -1465,8 +1905,19 @@ async def help_command(message: Message, state: FSMContext):
             "📰 Новости - просмотр актуальных новостей\n"
             "📝 Задолженности - просмотр академических долгов\n"
             "📊 Тесты - просмотр предстоящих тестов\n\n"
+            "✅ /start - войти в систему\n"
             "🔗 /unbind - отвязать текущего пользователя\n"
             "🚪 /logout - выйти из системы\n"
             "❌ /cancel - отменить текущее действие"
         )
     await message.answer(help_text, parse_mode="HTML")
+
+
+@router.message(StateFilter(any_state), F.text)  # Обрабатываем любое текстовое сообщение в любом состоянии
+async def handle_unknown_command(message: Message, state: FSMContext):
+    # Получаем текущее состояние
+    current_state = await state.get_state()
+    
+    # Если состояние None или admin_mode/user_mode (основные состояния)
+    if current_state is None or current_state in [AuthStates.admin_mode.state, AuthStates.user_mode.state]:
+        await message.answer("❌ Неизвестная команда. Введите /help для справки. ")

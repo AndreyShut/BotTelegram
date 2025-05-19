@@ -2,12 +2,50 @@ import sqlite3
 from security import PasswordManager
 from datetime import datetime, timedelta
 import json
+import logging
+from pathlib import Path
+from typing import Dict, List
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+def validate_student_data(student: Dict) -> bool:
+    """Проверяет корректность данных студента"""
+    required_fields = {"id", "login", "password", "name"}
+    if not all(field in student for field in required_fields):
+        logger.warning(f"Отсутствуют обязательные поля у студента: {student}")
+        return False
+    return True
+
+def load_students_from_json(json_path: str) -> Dict:
+    """Загружает данные студентов из JSON файла"""
+    try:
+        if not Path(json_path).exists():
+            raise FileNotFoundError(f"Файл {json_path} не найден")
+        
+        with open(json_path, "r", encoding='utf-8') as f:
+            students_data = json.load(f)
+        
+        if not isinstance(students_data, dict):
+            raise ValueError("Некорректный формат JSON файла")
+        
+        return students_data
+    except json.JSONDecodeError as e:
+        logger.error(f"Ошибка парсинга JSON: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка загрузки файла: {e}")
+        raise
 
 def populate_database():
     conn = sqlite3.connect('student_bot.db')
     cur = conn.cursor()
     pw_manager = PasswordManager()
+    
+
 
     # Группы
     groups = [
@@ -19,19 +57,41 @@ def populate_database():
         cur.execute("INSERT OR IGNORE INTO groups (id, name_group) VALUES (?, ?)", group)
 
     # Студенты
-    with open("students.json", "r", encoding='utf-8') as f:
-        students_data = json.load(f)
-
-    for group_id, students in students_data.items():
-        for student in students:
-            id_student = student["id"]
-            login = student["login"]
-            password = student["password"]
-            description = student["name"]
-            cur.execute(
-                "INSERT OR IGNORE INTO students (id_student, id_group, login, password, description) VALUES (?, ?, ?, ?, ?)",
-                (id_student, group_id, login, pw_manager.encrypt(password), description)
-            )
+    try:
+        students_data = load_students_from_json("students.json")
+        total_students = 0
+        
+        for group_id, students in students_data.items():
+            if not isinstance(students, list):
+                logger.warning(f"Некорректный формат данных для группы {group_id}")
+                continue
+            
+            for student in students:
+                if not validate_student_data(student):
+                    continue
+                
+                try:
+                    encrypted_password = pw_manager.encrypt(student["password"])
+                    cur.execute(
+                        """INSERT OR IGNORE INTO students 
+                        (id_student, id_group, login, password, description) 
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            student["id"],
+                            group_id,
+                            student["login"],
+                            encrypted_password,
+                            student["name"]
+                        )
+                    )
+                    total_students += 1
+                except Exception as e:
+                    logger.error(f"Ошибка добавления студента {student.get('login')}: {e}")
+        
+        logger.info(f"Добавлено {total_students} студентов")
+    except Exception as e:
+        logger.error("Ошибка при заполнении студентов")
+        raise
 
 
  # Добавляем преподавателей
