@@ -130,12 +130,14 @@ class StudentBotDB:
             'CREATE INDEX IF NOT EXISTS idx_tests_group ON tests(group_id)',
             'CREATE INDEX IF NOT EXISTS idx_tests_discipline ON tests(discipline_id)',
             'CREATE INDEX IF NOT EXISTS idx_tests_timestamps ON tests(created_at, updated_at, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS idx_tests_updated ON tests(updated_at)',
 
             # Индексы для таблицы student_debts
             'CREATE INDEX IF NOT EXISTS idx_debts_date ON student_debts(last_date)',
             'CREATE INDEX IF NOT EXISTS idx_debts_student ON student_debts(student_id)',
             'CREATE INDEX IF NOT EXISTS idx_debts_discipline ON student_debts(discipline_id)',
             'CREATE INDEX IF NOT EXISTS idx_debts_timestamps ON student_debts(created_at, updated_at, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS idx_debts_updated ON student_debts(updated_at)',
 
             # Индексы для таблицы sent_notifications
             'CREATE INDEX IF NOT EXISTS idx_sent_notifications_user ON sent_notifications(user_id)',
@@ -155,7 +157,13 @@ class StudentBotDB:
             AFTER UPDATE ON tests
             FOR EACH ROW
             BEGIN
-                UPDATE tests SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                UPDATE tests 
+                SET updated_at = CURRENT_TIMESTAMP 
+                WHERE id = NEW.id
+                AND (OLD.group_id != NEW.group_id 
+                    OR OLD.discipline_id != NEW.discipline_id
+                    OR OLD.test_link != NEW.test_link
+                    OR OLD.date != NEW.date);
             END;''',
             
             '''CREATE TRIGGER IF NOT EXISTS update_debt_timestamp
@@ -166,7 +174,8 @@ class StudentBotDB:
                 SET updated_at = CURRENT_TIMESTAMP 
                 WHERE student_id = NEW.student_id 
                 AND discipline_id = NEW.discipline_id 
-                AND debt_type_id = NEW.debt_type_id;
+                AND debt_type_id = NEW.debt_type_id
+                AND (OLD.last_date != NEW.last_date);
             END;'''
         ]
 

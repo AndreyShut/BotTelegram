@@ -628,11 +628,17 @@ async def test_add_date(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             await conn.execute('''
-                INSERT INTO tests (group_id, discipline_id, test_link, date)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO tests (group_id, discipline_id, test_link, date,created_at,updated_at)
+                VALUES (?, ?, ?, ?,CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ''', (data["group_id"], discipline[0], data["test_link"], date))
             await conn.commit()
-        await message.answer("✅ Тест добавлен!", reply_markup=kb.admin_kb)
+            await message.answer("✅ Тест добавлен!\n"
+                         f"👥 Группа: {data['group_id']}\n"
+                         f"📚 Дисциплина: {data['subject_id']}\n"
+                         f"👨‍🏫 Преподаватель: {data['teacher_id']}\n"
+                         f"🔗 Ссылка: {data['test_link']}\n"
+                         f"⏳ Дата: {date}",
+                         reply_markup=kb.admin_kb)
     except Exception as e:
         logger.error(f"Ошибка добавления теста: {e}")
         await message.answer("❌ Не удалось добавить тест.")
@@ -736,7 +742,11 @@ async def execute_delete_test(message: Message, state: FSMContext):
             return
             
         async with db.get_connection() as conn:
-            await conn.execute("DELETE FROM tests WHERE id = ?", (test_id,))
+            await conn.execute("""
+                UPDATE tests 
+                SET deleted_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (test_id,))
             await conn.commit()
 
         await message.answer(
@@ -1800,7 +1810,7 @@ async def debt_choose_date(message: Message, state: FSMContext):
     if message.text == "/cancel":
         await cancel_command(message, state)
         return
-        
+    
     date = message.text.strip()
     try:
         # Проверяем корректность даты
@@ -1810,7 +1820,8 @@ async def debt_choose_date(message: Message, state: FSMContext):
         return
         
     data = await state.get_data()
-    
+    await state.update_data(last_date=date)
+
     # Проверяем, не существует ли уже такой долг
     async with db.get_connection() as conn:
         async with conn.execute("""
@@ -1824,8 +1835,8 @@ async def debt_choose_date(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             await conn.execute("""
-                INSERT INTO student_debts (student_id, discipline_id, debt_type_id, last_date)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO student_debts (student_id, discipline_id, debt_type_id, last_date, created_at, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """, (data["student_id"], data["discipline_id"], data["debt_type_id"], date))
             await conn.commit()
             
@@ -1991,49 +2002,19 @@ async def debt_edit_save(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             if data["edit_field"] == "discipline":
-                # Получаем все данные старой записи
-                async with conn.execute("""
-                    SELECT last_date 
-                    FROM student_debts 
+                await conn.execute("""
+                    UPDATE student_debts 
+                    SET discipline_id = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
-                """, (data["student_id"], data["discipline_id"], data["debt_type_id"])) as cur:
-                    old_row = await cur.fetchone()
-                
-                if old_row:
-                    # Удаляем старую запись
-                    await conn.execute("""
-                        DELETE FROM student_debts 
-                        WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
-                    """, (data["student_id"], data["discipline_id"], data["debt_type_id"]))
-                    
-                    # Создаем новую запись с новой дисциплиной
-                    await conn.execute("""
-                        INSERT INTO student_debts (student_id, discipline_id, debt_type_id, last_date)
-                        VALUES (?, ?, ?, ?)
-                    """, (data["student_id"], int(value), data["debt_type_id"], old_row[0]))
+                """, (int(value), data["student_id"], data["discipline_id"], data["debt_type_id"]))
                     
             elif data["edit_field"] == "type":
-                # Получаем все данные старой записи
-                async with conn.execute("""
-                    SELECT last_date 
-                    FROM student_debts 
+                await conn.execute("""
+                    UPDATE student_debts 
+                    SET debt_type_id = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
-                """, (data["student_id"], data["discipline_id"], data["debt_type_id"])) as cur:
-                    old_row = await cur.fetchone()
+                """, (int(value), data["student_id"], data["discipline_id"], data["debt_type_id"]))
                 
-                if old_row:
-                    # Удаляем старую запись
-                    await conn.execute("""
-                        DELETE FROM student_debts 
-                        WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
-                    """, (data["student_id"], data["discipline_id"], data["debt_type_id"]))
-                    
-                    # Создаем новую запись с новым типом долга
-                    await conn.execute("""
-                        INSERT INTO student_debts (student_id, discipline_id, debt_type_id, last_date)
-                        VALUES (?, ?, ?, ?)
-                    """, (data["student_id"], data["discipline_id"], int(value), old_row[0]))
-                    
             elif data["edit_field"] == "date":
                 try:
                     # Проверяем корректность даты
@@ -2043,9 +2024,11 @@ async def debt_edit_save(message: Message, state: FSMContext):
                     return
                 
                 await conn.execute("""
-                    UPDATE student_debts SET last_date = ? 
+                    UPDATE student_debts 
+                    SET last_date = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
                 """, (value, data["student_id"], data["discipline_id"], data["debt_type_id"]))
+
             
             await conn.commit()
         await message.answer("✅ Долг обновлен", reply_markup=kb.debts_admin_kb)
@@ -2105,7 +2088,9 @@ async def debt_delete(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             await conn.execute("""
-                DELETE FROM student_debts WHERE student_id=? AND discipline_id=? AND debt_type_id=?
+                UPDATE student_debts 
+                SET deleted_at = CURRENT_TIMESTAMP
+                WHERE student_id=? AND discipline_id=? AND debt_type_id=?
             """, (student_id, discipline_id, debt_type_id))
             await conn.commit()
         await message.answer("🗑️ Долг удален", reply_markup=kb.debts_admin_kb)
