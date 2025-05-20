@@ -13,8 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('notifications.log')
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -113,8 +112,8 @@ async def check_test_changes(
             SELECT t.id, t.test_link, t.date, g.name_group, subj.name, tch.full_name, 
                 CASE 
                     WHEN t.deleted_at IS NOT NULL AND datetime(t.deleted_at) > datetime(?, 'utc') THEN 'deleted'
-                    WHEN datetime(t.updated_at) > datetime(?, 'utc') THEN 'updated'
                     WHEN datetime(t.created_at) > datetime(?, 'utc') AND datetime(t.created_at) = datetime(t.updated_at) THEN 'created'
+                    WHEN datetime(t.updated_at) > datetime(?, 'utc') THEN 'updated'
                 END as change_type,
                 MAX(COALESCE(t.created_at, t.updated_at, t.deleted_at)) as change_time
             FROM tests t
@@ -254,8 +253,8 @@ async def check_debt_changes(
                    subj.name, dt.name, sd.last_date,
                    CASE 
                         WHEN sd.deleted_at IS NOT NULL AND datetime(sd.deleted_at) > datetime(?, 'utc') THEN 'deleted'
-                        WHEN datetime(sd.updated_at) > datetime(?, 'utc') THEN 'updated'
                         WHEN datetime(sd.created_at) > datetime(?, 'utc') AND datetime(sd.created_at) = datetime(sd.updated_at) THEN 'created'
+                        WHEN datetime(sd.updated_at) > datetime(?, 'utc') THEN 'updated'
                    END as change_type,
                    MAX(COALESCE(sd.created_at, sd.updated_at, sd.deleted_at)) as change_time
             FROM student_debts sd

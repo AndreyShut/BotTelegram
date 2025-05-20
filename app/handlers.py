@@ -2157,15 +2157,12 @@ async def help_command(message: Message, state: FSMContext):
         )
     await message.answer(help_text, parse_mode="HTML")
 
-@router.message(Command("clear"))
-async def clear(message: Message, state: FSMContext):
-    clear_state = await state.get_state()
-    if clear_state == AuthStates.admin_mode.state:
-        await cleanup_deleted_records()
+@router.message(Command("clear"), AuthStates.admin_mode)
+async def clear_command(message: Message):
+    if await cleanup_deleted_records():
         await message.answer("🗑️ Удаленные записи очищены")
     else:
-        await message.answer("❌ Неизвестная команда. Введите /help для справки")
-
+        await message.answer("❌ Произошла ошибка при очистке удаленных записей")
 
 @router.message(StateFilter(any_state), F.text)  # Обрабатываем любое текстовое сообщение в любом состоянии
 async def handle_unknown_command(message: Message, state: FSMContext):
@@ -2175,3 +2172,13 @@ async def handle_unknown_command(message: Message, state: FSMContext):
     # Если состояние None или admin_mode/user_mode (основные состояния)
     if current_state is None or current_state in [AuthStates.admin_mode.state, AuthStates.user_mode.state]:
         await message.answer("❌ Неизвестная команда. Введите /help для справки")
+
+@router.message(StateFilter(any_state), F.text)
+async def handle_unknown_input(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    
+    if current_state is None or current_state in [AuthStates.admin_mode.state, AuthStates.user_mode.state]:
+        if message.text.startswith('/'):
+            await message.answer("❌ Неизвестная команда. Введите /help для справки")
+        else:
+            await message.answer("❌ Неизвестная команда. Введите /help для справки")
