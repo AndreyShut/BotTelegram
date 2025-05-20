@@ -207,6 +207,25 @@ async def safe_send_message(message: Message, text: str, **kwargs):
         logger.error(f"Ошибка отправки сообщения: {e}")
         await message.answer("❌ Не удалось отправить сообщение")
 
+
+
+async def cleanup_deleted_records():
+    try:
+        async with db.get_connection() as conn:
+            # Удаляем записи из всех таблиц с soft delete
+            tables = [
+                "tests", "student_debts", 
+            ]
+            
+            for table in tables:
+                    await conn.execute(f"DELETE FROM {table} WHERE deleted_at NOT NULL")
+            await conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error cleaning up deleted records: {e}")
+        return False
+
+
 # ==================== ОБРАБОТЧИКИ ОТМЕНЫ ====================
 async def cancel_command(message: Message, state: FSMContext):
     current_state = await state.get_state()
@@ -398,7 +417,7 @@ async def show_debts(message: Message):
                 JOIN disciplines d ON sd.discipline_id = d.id
                 JOIN subjects subj ON d.subject_id = subj.id
                 JOIN debt_types dt ON sd.debt_type_id = dt.id
-                WHERE sd.student_id = ?
+                WHERE sd.student_id = ? AND sd.deleted_at IS NULL
                 ORDER BY sd.last_date
             ''', (student[0],)) as cursor:
                 debts = await cursor.fetchall()
@@ -437,7 +456,7 @@ async def show_tests(message: Message):
                 JOIN disciplines d ON t.discipline_id = d.id
                 JOIN subjects subj ON d.subject_id = subj.id
                 JOIN teachers tch ON d.teacher_id = tch.id
-                WHERE t.group_id = (SELECT id_group FROM students WHERE id_student = ?)
+                WHERE t.group_id = (SELECT id_group FROM students WHERE id_student = ?) AND t.deleted_at IS NULL
                 ORDER BY t.date ASC
                 LIMIT 10
             ''', (student[0],)) as cursor:
@@ -520,7 +539,7 @@ async def manage_tests(message: Message, state: FSMContext):
 async def test_add_start(message: Message, state: FSMContext):
     # Список групп
     async with db.get_connection() as conn:
-        async with conn.execute("SELECT id, name_group FROM groups ORDER BY name_group") as cursor:
+        async with conn.execute("SELECT id, name_group FROM groups ORDER BY id") as cursor:
             groups = await cursor.fetchall()
     if not groups:
         await message.answer("❌ группы не найдены")
@@ -655,6 +674,7 @@ async def list_tests(message: Message):
                 JOIN disciplines d ON t.discipline_id = d.id
                 JOIN subjects s ON d.subject_id = s.id
                 JOIN teachers tch ON d.teacher_id = tch.id
+                WHERE t.deleted_at IS NULL
                 ORDER BY t.date DESC
                 LIMIT 20
             ''') as cursor:
@@ -688,11 +708,12 @@ async def delete_test_start(message: Message, state: FSMContext):
     try:
         async with db.get_connection() as conn:
             async with conn.execute('''
-                SELECT t.id, g.name_group, s.name, t.date 
+                SELECT t.id, g.name_group, s.name, t.date
                 FROM tests t
                 JOIN groups g ON t.group_id = g.id
                 JOIN disciplines d ON t.discipline_id = d.id
                 JOIN subjects s ON d.subject_id = s.id
+                WHERE t.deleted_at IS NULL
                 ORDER BY t.date DESC
                 LIMIT 50
             ''') as cursor:
@@ -732,7 +753,7 @@ async def execute_delete_test(message: Message, state: FSMContext):
                 JOIN disciplines d ON t.discipline_id = d.id
                 JOIN subjects s ON d.subject_id = s.id
                 JOIN teachers tch ON d.teacher_id = tch.id
-                WHERE t.id = ?
+                WHERE t.id = ? AND t.deleted_at IS NULL
             ''', (test_id,)) as cursor:
                 test = await cursor.fetchone()
         
@@ -744,7 +765,8 @@ async def execute_delete_test(message: Message, state: FSMContext):
         async with db.get_connection() as conn:
             await conn.execute("""
                 UPDATE tests 
-                SET deleted_at = CURRENT_TIMESTAMP 
+                SET deleted_at = CURRENT_TIMESTAMP, 
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (test_id,))
             await conn.commit()
@@ -1654,6 +1676,7 @@ async def debt_list(message: Message, state: FSMContext):
             JOIN disciplines d ON sd.discipline_id = d.id
             JOIN subjects subj ON d.subject_id = subj.id
             JOIN debt_types dt ON sd.debt_type_id = dt.id
+            WHERE sd.deleted_at IS NULL
             ORDER BY s.id_student
         """) as cur:
             debts = await cur.fetchall()
@@ -1826,7 +1849,7 @@ async def debt_choose_date(message: Message, state: FSMContext):
     async with db.get_connection() as conn:
         async with conn.execute("""
             SELECT 1 FROM student_debts 
-            WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
+            WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ? AND deleted_at IS NULL
         """, (data["student_id"], data["discipline_id"], data["debt_type_id"])) as cur:
             if await cur.fetchone():
                 await message.answer("❌ Такой долг уже существует")
@@ -1865,6 +1888,7 @@ async def debt_edit_start(message: Message, state: FSMContext):
             JOIN disciplines d ON sd.discipline_id = d.id
             JOIN subjects subj ON d.subject_id = subj.id
             JOIN debt_types dt ON sd.debt_type_id = dt.id
+            WHERE sd.deleted_at IS NULL
             ORDER BY s.id_student
         """) as cur:
             debts = await cur.fetchall()
@@ -1875,7 +1899,7 @@ async def debt_edit_start(message: Message, state: FSMContext):
     
     debts_list = []
     for d in debts:
-        debts_list.append(f"{d[0]},{d[1]},{d[2]}: {d[3]} - {d[4]} ({d[5]}) до {d[6]}")
+        debts_list.append(f"{d[0]},{d[1]},{d[2]}: {d[3]} - {d[4]} ({d[5]}) до {d[6]} ")
     
     await safe_send_message(
         message,
@@ -1934,7 +1958,7 @@ async def debt_edit_field(message: Message, state: FSMContext):
                 FROM disciplines d
                 JOIN subjects s ON d.subject_id = s.id
                 JOIN teachers t ON d.teacher_id = t.id
-                WHERE d.id = ?
+                WHERE d.id = ? 
             """, (data["discipline_id"],)) as cur:
                 current = await cur.fetchone()
             
@@ -2005,14 +2029,14 @@ async def debt_edit_save(message: Message, state: FSMContext):
                 await conn.execute("""
                     UPDATE student_debts 
                     SET discipline_id = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
+                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ? AND deleted_at IS NULL
                 """, (int(value), data["student_id"], data["discipline_id"], data["debt_type_id"]))
                     
             elif data["edit_field"] == "type":
                 await conn.execute("""
                     UPDATE student_debts 
                     SET debt_type_id = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
+                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ? AND deleted_at IS NULL
                 """, (int(value), data["student_id"], data["discipline_id"], data["debt_type_id"]))
                 
             elif data["edit_field"] == "date":
@@ -2026,7 +2050,7 @@ async def debt_edit_save(message: Message, state: FSMContext):
                 await conn.execute("""
                     UPDATE student_debts 
                     SET last_date = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ?
+                    WHERE student_id = ? AND discipline_id = ? AND debt_type_id = ? AND deleted_at IS NULL
                 """, (value, data["student_id"], data["discipline_id"], data["debt_type_id"]))
 
             
@@ -2048,6 +2072,7 @@ async def debt_delete_start(message: Message, state: FSMContext):
             JOIN disciplines d ON sd.discipline_id = d.id
             JOIN subjects subj ON d.subject_id = subj.id
             JOIN debt_types dt ON sd.debt_type_id = dt.id
+            WHERE deleted_at IS NULL
             ORDER BY s.id_student
         """) as cur:
             debts = await cur.fetchall()
@@ -2089,8 +2114,9 @@ async def debt_delete(message: Message, state: FSMContext):
         async with db.get_connection() as conn:
             await conn.execute("""
                 UPDATE student_debts 
-                SET deleted_at = CURRENT_TIMESTAMP
-                WHERE student_id=? AND discipline_id=? AND debt_type_id=?
+                SET deleted_at = CURRENT_TIMESTAMP,  
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE student_id=? AND discipline_id=? AND debt_type_id=? AND deleted_at IS NULL
             """, (student_id, discipline_id, debt_type_id))
             await conn.commit()
         await message.answer("🗑️ Долг удален", reply_markup=kb.debts_admin_kb)
@@ -2103,7 +2129,7 @@ async def debt_delete(message: Message, state: FSMContext):
 @router.message(Command("help"))
 async def help_command(message: Message, state: FSMContext):
     current_state = await state.get_state()
-    if current_state == AuthStates.admin_mode:
+    if current_state == AuthStates.admin_mode.state:
         help_text = (
             "🛠 <b>Команды администратора</b>:\n\n"
             "👥 Управление пользователями - просмотр и редактирование пользователей\n"
@@ -2114,6 +2140,7 @@ async def help_command(message: Message, state: FSMContext):
             "⏳ Управление долгами - просмотр и редактирование долгов студентов\n\n"
             "🔗 /unbind - отвязать текущего пользователя\n"
             "🚪 /logout - выйти из системы\n"
+            "🗑️ /clear - очистить удаленные записи из БД\n"
             "❌ /cancel - отменить текущее действие"
         )
     else:
@@ -2129,6 +2156,15 @@ async def help_command(message: Message, state: FSMContext):
             "❌ /cancel - отменить текущее действие"
         )
     await message.answer(help_text, parse_mode="HTML")
+
+@router.message(Command("clear"))
+async def clear(message: Message, state: FSMContext):
+    clear_state = await state.get_state()
+    if clear_state == AuthStates.admin_mode.state:
+        await cleanup_deleted_records()
+        await message.answer("🗑️ Удаленные записи очищены")
+    else:
+        await message.answer("❌ Неизвестная команда. Введите /help для справки")
 
 
 @router.message(StateFilter(any_state), F.text)  # Обрабатываем любое текстовое сообщение в любом состоянии

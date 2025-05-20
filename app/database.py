@@ -160,10 +160,12 @@ class StudentBotDB:
                 UPDATE tests 
                 SET updated_at = CURRENT_TIMESTAMP 
                 WHERE id = NEW.id
-                AND (OLD.group_id != NEW.group_id 
+                AND ((OLD.group_id != NEW.group_id 
                     OR OLD.discipline_id != NEW.discipline_id
                     OR OLD.test_link != NEW.test_link
-                    OR OLD.date != NEW.date);
+                    OR OLD.date != NEW.date)
+                    OR (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
+                    OR (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL));
             END;''',
             
             '''CREATE TRIGGER IF NOT EXISTS update_debt_timestamp
@@ -175,7 +177,9 @@ class StudentBotDB:
                 WHERE student_id = NEW.student_id 
                 AND discipline_id = NEW.discipline_id 
                 AND debt_type_id = NEW.debt_type_id
-                AND (OLD.last_date != NEW.last_date);
+                AND ((OLD.last_date != NEW.last_date)
+                    OR (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
+                    OR (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL));
             END;'''
         ]
 

@@ -34,6 +34,7 @@ async def track_changes(db_path: str, bot: Bot):
     """Основная функция отслеживания изменений"""
     tracker = ChangeTracker()
     semaphore = asyncio.Semaphore(100)
+    conn = None
     
     while True:
         try:
@@ -41,16 +42,20 @@ async def track_changes(db_path: str, bot: Bot):
             async with aiosqlite.connect(db_path) as conn:
                 start_time = time.time()
                 # Check both tests and debts
-                test_changes = await check_test_changes(conn, bot, tracker, semaphore)
-                debt_changes = await check_debt_changes(conn, bot, tracker, semaphore)
-                
+                test_task = check_test_changes(conn, bot, tracker, semaphore)
+                debt_task = check_debt_changes(conn, bot, tracker, semaphore)
+                await asyncio.gather(test_task, debt_task)
+                tracker.last_check_time = datetime.now()
+
                 logger.debug(f"Change tracking completed in {time.time() - start_time:.2f}s")
-            
-            await asyncio.sleep(5)
+                await asyncio.sleep(5)
             
         except Exception as e:
             logger.error(f"Error in tracker main loop: {e}")
             await asyncio.sleep(10)
+        finally:
+            if conn:
+                await conn.close()
 
 async def check_test_changes(
     db_connection: aiosqlite.Connection, 
@@ -66,25 +71,26 @@ async def check_test_changes(
         # Получаем изменения тестов
         async with db_connection.execute('''
             SELECT t.id, t.test_link, t.date, g.name_group, subj.name, tch.full_name, 
-                CASE 
-                    WHEN t.created_at > ? THEN 'created'
-                    WHEN t.updated_at > ? AND t.updated_at != t.created_at THEN 'updated'
-                    WHEN t.deleted_at > ? THEN 'deleted'
-                END as change_type,
-                MAX(COALESCE(t.created_at, t.updated_at, t.deleted_at)) as change_time
+                    CASE 
+                        WHEN t.deleted_at > ? THEN 'deleted'
+                        WHEN t.updated_at > ? AND t.updated_at != t.created_at THEN 'updated'
+                        WHEN t.created_at > ? THEN 'created'
+                    END as change_type,
+                    MAX(COALESCE(t.created_at, t.updated_at, t.deleted_at)) as change_time
             FROM tests t
             JOIN groups g ON t.group_id = g.id
             JOIN disciplines d ON t.discipline_id = d.id
             JOIN subjects subj ON d.subject_id = subj.id
             JOIN teachers tch ON d.teacher_id = tch.id
-            WHERE t.created_at > ? OR (t.updated_at > ? AND t.updated_at != t.created_at) OR t.deleted_at > ?
+            WHERE t.deleted_at > ? OR (t.updated_at > ? AND t.updated_at != t.created_at) OR t.created_at > ?
             GROUP BY t.id, change_type
         ''', (last_check_str,) * 6) as cursor:
-            changes = await cursor.fetchall()
+                changes = await cursor.fetchall()
         
-        logger.debug(f"Found {len(changes)} test changes since {last_check_str}")
-        
+
+        logger.debug(f"Test changes detected: {changes}")
         if not changes:
+            logger.debug("No test changes found")
             return
         
         # Группируем по группе для batch-обработки
@@ -195,23 +201,23 @@ async def check_debt_changes(
             SELECT sd.student_id, sd.discipline_id, sd.debt_type_id, 
                    subj.name, dt.name, sd.last_date,
                    CASE 
-                       WHEN sd.created_at > ? THEN 'created'
-                       WHEN sd.updated_at > ? AND sd.updated_at != sd.created_at THEN 'updated'
                        WHEN sd.deleted_at > ? THEN 'deleted'
+                       WHEN sd.updated_at > ? AND sd.updated_at != sd.created_at THEN 'updated'
+                       WHEN sd.created_at > ? THEN 'created'
                    END as change_type,
                    MAX(COALESCE(sd.created_at, sd.updated_at, sd.deleted_at)) as change_time
             FROM student_debts sd
             JOIN disciplines d ON sd.discipline_id = d.id
             JOIN subjects subj ON d.subject_id = subj.id
             JOIN debt_types dt ON sd.debt_type_id = dt.id
-            WHERE sd.created_at > ? OR (sd.updated_at > ? AND sd.updated_at != sd.created_at) OR sd.deleted_at > ?
+            WHERE sd.deleted_at > ? OR sd.updated_at > ? OR sd.created_at > ?
             GROUP BY sd.student_id, sd.discipline_id, sd.debt_type_id, change_type
         ''', (last_check_str,) * 6) as cursor:
             changes = await cursor.fetchall()
         
-        logger.debug(f"Found {len(changes)} debt changes since {last_check_str}")
-        
+        logger.debug(f"Debt changes detected: {changes}")
         if not changes:
+            logger.debug("No debt changes found")
             return
         
         # Группируем по студентам
@@ -314,6 +320,7 @@ async def send_notification_with_retry(
 ):
     """Отправка уведомления с повторными попытками"""
     async with semaphore:
+        last_error = None
         for attempt in range(max_retries):
             try:
                 await bot.send_message(
@@ -324,11 +331,13 @@ async def send_notification_with_retry(
                 tracker.sent_notifications.add(notification_key)
                 return True
             except Exception as e:
-                if attempt == max_retries - 1:
-                    raise
+                last_error = e
+                if "bot was blocked" in str(e).lower():
+                    break  # Не пытаемся повторно, если бот заблокирован
                 await asyncio.sleep(1 * (attempt + 1))
-    return False
-
+        
+        logger.error(f"Failed to send notification after {max_retries} attempts: {last_error}")
+        return False
 
 class FileWatcher:
     def __init__(self):
@@ -395,7 +404,6 @@ async def mark_user_inactive(db_connection: aiosqlite.Connection, telegram_id: i
 
 async def notify_users(bot: Bot):
     db_connection = None
-    file_watcher = FileWatcher()
     
    # Уменьшите задержки
     BATCH_SIZE = 100  # Увеличьте размер батча
@@ -410,6 +418,7 @@ async def notify_users(bot: Bot):
     
     try:
         db_connection = await aiosqlite.connect('student_bot.db')
+        file_watcher = FileWatcher()
         while True:
             try:
                 
