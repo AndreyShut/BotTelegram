@@ -41,9 +41,23 @@ def load_students_from_json(json_path: str) -> Dict:
         logger.error(f"Ошибка загрузки файла: {e}")
         raise
 
+async def check_triggers_exist():
+    conn = sqlite3.connect('student_bot.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+    triggers = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    required_triggers = ['update_test_timestamp', 'update_debt_timestamp']
+    missing = [t for t in required_triggers if t not in triggers]
+    if missing:
+        logger.error(f"Missing triggers: {missing}")
+        raise RuntimeError(f"Required triggers not found: {missing}")
+
 
 async def populate_database():
     try:
+        await check_triggers_exist()
         conn = sqlite3.connect('student_bot.db')
         cur = conn.cursor()
         

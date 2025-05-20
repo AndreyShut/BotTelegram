@@ -52,31 +52,25 @@ async def main():
             change_tracking_task = asyncio.create_task(track_changes('student_bot.db', bot))
 
         # Запускаем polling с обработкой ошибок сети
-            while True:
-                try:
-                    await dp.start_polling(bot)
-                    notification_task.cancel()
-                    change_tracking_task.cancel()
-                    await asyncio.gather(notification_task, change_tracking_task, return_exceptions=True)
-                    break  # Если polling завершился без ошибок
-                except TelegramNetworkError as e:
-                    logger.error(f"Ошибка сети в polling: {e}")
-                    await asyncio.sleep(10)  # Пауза перед повторной попыткой
-                except Exception as e:
-                    logger.error(f"Неожиданная ошибка в polling: {e}")
-                    await asyncio.sleep(10)
-            break
+            async def run_tasks():
+                        while True:
+                            try:
+                                await dp.start_polling(bot)
+                            except Exception as e:
+                                logger.error(f"Polling error: {e}")
+                                await asyncio.sleep(10)
 
-        
-
+            await asyncio.gather(
+            run_tasks(),
+            notification_task,
+            change_tracking_task,
+            return_exceptions=True
+            )
+            
         except Exception as e:
-            logger.critical(f"Критическая ошибка в main (попытка {attempt + 1}/{max_restarts}): {e}")
-            if attempt == max_restarts - 1:
-                raise  # Последняя попытка - пробрасываем исключение
+            logger.critical(f"Critical error: {e}")
+        finally:
             await shutdown(bot)
-            logger.info(f"Повторный запуск через {restart_delay} секунд...")
-            await asyncio.sleep(restart_delay)
-    await  shutdown(bot)
             
 
 if __name__ == "__main__":

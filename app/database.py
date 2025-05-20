@@ -26,6 +26,7 @@ class StudentBotDB:
                 connection.close()
 
     def create_database(self):
+
         """Создание всех таблиц базы данных и индексов"""
         # Создание таблиц
         table_queries = [
@@ -150,36 +151,32 @@ class StudentBotDB:
             'CREATE INDEX IF NOT EXISTS idx_disciplines_group ON disciplines(group_id)'
         ]
 
-        # In database.py, update the trigger definitions:
 
         trigger_queries = [
             '''CREATE TRIGGER IF NOT EXISTS update_test_timestamp
             AFTER UPDATE ON tests
             FOR EACH ROW
+            WHEN (OLD.group_id != NEW.group_id OR 
+                OLD.discipline_id != NEW.discipline_id OR
+                OLD.test_link != NEW.test_link OR
+                OLD.date != NEW.date OR
+                (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL) OR
+                (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL))
             BEGIN
-                UPDATE tests 
-                SET updated_at = CURRENT_TIMESTAMP 
-                WHERE id = NEW.id
-                AND ((OLD.group_id != NEW.group_id 
-                    OR OLD.discipline_id != NEW.discipline_id
-                    OR OLD.test_link != NEW.test_link
-                    OR OLD.date != NEW.date)
-                    OR (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
-                    OR (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL));
+                UPDATE tests SET updated_at = datetime('now') WHERE id = NEW.id;
             END;''',
             
             '''CREATE TRIGGER IF NOT EXISTS update_debt_timestamp
             AFTER UPDATE ON student_debts
             FOR EACH ROW
+            WHEN (OLD.last_date != NEW.last_date OR
+                (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL) OR
+                (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL))
             BEGIN
-                UPDATE student_debts 
-                SET updated_at = CURRENT_TIMESTAMP 
+                UPDATE student_debts SET updated_at = datetime('now') 
                 WHERE student_id = NEW.student_id 
                 AND discipline_id = NEW.discipline_id 
-                AND debt_type_id = NEW.debt_type_id
-                AND ((OLD.last_date != NEW.last_date)
-                    OR (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
-                    OR (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL));
+                AND debt_type_id = NEW.debt_type_id;
             END;'''
         ]
 
@@ -198,6 +195,7 @@ class StudentBotDB:
         for query in trigger_queries:
             try:
                 self._execute(query, commit=True)
+                logger.info("Database triggers created successfully")
             except Exception as e:
                 logger.error(f"Ошибка при создании триггера: {e}")
 
