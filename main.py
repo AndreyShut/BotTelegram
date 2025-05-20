@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramNetworkError
 from app.handlers import router
 from dotenv import load_dotenv
-from app.notification import notify_users
+from app.notification import notify_users,track_changes
 from app.state import BotState
 from app.db_manager import db
 
@@ -48,12 +48,16 @@ async def main():
                     logger.warning(f"Ошибка при удалении webhook (попытка {attempt + 1}): {e}")
                     await asyncio.sleep(5)
 
-            BotState.notification_task = asyncio.create_task(notify_users(bot))
+            notification_task = asyncio.create_task(notify_users(bot))
+            change_tracking_task = asyncio.create_task(track_changes('student_bot.db', bot))
 
         # Запускаем polling с обработкой ошибок сети
             while True:
                 try:
                     await dp.start_polling(bot)
+                    notification_task.cancel()
+                    change_tracking_task.cancel()
+                    await asyncio.gather(notification_task, change_tracking_task, return_exceptions=True)
                     break  # Если polling завершился без ошибок
                 except TelegramNetworkError as e:
                     logger.error(f"Ошибка сети в polling: {e}")
@@ -62,6 +66,8 @@ async def main():
                     logger.error(f"Неожиданная ошибка в polling: {e}")
                     await asyncio.sleep(10)
             break
+
+        
 
         except Exception as e:
             logger.critical(f"Критическая ошибка в main (попытка {attempt + 1}/{max_restarts}): {e}")

@@ -91,7 +91,7 @@ schedule_menu = ReplyKeyboardMarkup(
         [KeyboardButton(text="👥 Расписание групп")],
         [KeyboardButton(text="👨‍🏫 Расписание преподавателей")],
         [KeyboardButton(text="⏳ График приёма задолженностей")],
-        [KeyboardButton(text="🔙 В главное меню")]
+        [KeyboardButton(text="🔙 Назад в меню")]
     ], resize_keyboard=True
     
 )

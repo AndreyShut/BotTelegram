@@ -46,6 +46,20 @@ class Database:
             cls._instance._connection_attempts = 0
         return cls._instance
     
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[aiosqlite.Connection, None]:
+        """Provides a connection with an active transaction"""
+        conn = await self.connect()
+        try:
+            await conn.execute("BEGIN")
+            yield conn
+            await conn.commit()
+        except Exception as e:
+            await conn.rollback()
+            logger.error(f"Transaction failed: {e}")
+            raise
+        
+    
     async def connect(self) -> aiosqlite.Connection:
         """Устанавливает соединение с БД с автоматическими повторами"""
         max_attempts = 3

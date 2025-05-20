@@ -6,171 +6,329 @@ from datetime import datetime, timedelta
 import os
 import hashlib
 import time
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple,Set
 
 logger = logging.getLogger(__name__)
+
 
 class ChangeTracker:
     def __init__(self):
         self.last_check_time = datetime.now()
-        self.sent_notifications = set()
+        self.sent_notifications: Set[Tuple] = set()
+        self.last_cleanup = datetime.now()
+    
+    async def cleanup_old(self):
+        """Очистка старых уведомлений для предотвращения утечки памяти"""
+        if datetime.now() - self.last_cleanup > timedelta(hours=1):
+            # Удаляем уведомления старше 24 часов
+            cutoff_time = datetime.now() - timedelta(days=1)
+            old_notifications = {
+                n for n in self.sent_notifications 
+                if len(n) > 2 and isinstance(n[2], datetime) and n[2] < cutoff_time
+            }
+            self.sent_notifications -= old_notifications
+            self.last_cleanup = datetime.now()
+            logger.debug(f"Cleaned up {len(old_notifications)} old notifications")
 
-async def track_changes(db_connection: aiosqlite.Connection, bot: Bot):
+async def track_changes(db_path: str, bot: Bot):
+    """Основная функция отслеживания изменений"""
     tracker = ChangeTracker()
+    semaphore = asyncio.Semaphore(100)
     
     while True:
         try:
-            # Проверяем изменения в тестах
-            await check_test_changes(db_connection, bot, tracker)
+            await tracker.cleanup_old()
+            async with aiosqlite.connect(db_path) as conn:
+                start_time = time.time()
+                # Check both tests and debts
+                test_changes = await check_test_changes(conn, bot, tracker, semaphore)
+                debt_changes = await check_debt_changes(conn, bot, tracker, semaphore)
+                
+                logger.debug(f"Change tracking completed in {time.time() - start_time:.2f}s")
             
-            # Проверяем изменения в долгах
-            await check_debt_changes(db_connection, bot, tracker)
-            
-            # Обновляем время последней проверки
-            tracker.last_check_time = datetime.now()
-            
-            await asyncio.sleep(10)  # Проверяем каждую минуту
+            await asyncio.sleep(5)
             
         except Exception as e:
-            logger.error(f"Ошибка в трекере изменений: {e}")
+            logger.error(f"Error in tracker main loop: {e}")
             await asyncio.sleep(10)
 
-async def check_test_changes(db_connection: aiosqlite.Connection, bot: Bot, tracker: ChangeTracker):
-    # Получаем все изменения тестов после последней проверки
-    async with db_connection.execute('''
-        SELECT t.id, t.test_link, t.date, g.name_group, subj.name, tch.full_name, 
-               CASE 
-                   WHEN t.created_at > ? THEN 'created'
-                   WHEN t.updated_at > ? THEN 'updated'
-                   WHEN t.deleted_at > ? THEN 'deleted'
-               END as change_type
-        FROM tests t
-        JOIN groups g ON t.group_id = g.id
-        JOIN disciplines d ON t.discipline_id = d.id
-        JOIN subjects subj ON d.subject_id = subj.id
-        JOIN teachers tch ON d.teacher_id = tch.id
-        WHERE t.created_at > ? OR t.updated_at > ? OR t.deleted_at > ?
-    ''', (tracker.last_check_time,) * 6) as cursor:
-        changes = await cursor.fetchall()
+async def check_test_changes(
+    db_connection: aiosqlite.Connection, 
+    bot: Bot, 
+    tracker: ChangeTracker,
+    semaphore: asyncio.Semaphore
+):
+    """Проверка изменений в тестах"""
+    start_time = time.time()
+    last_check_str = tracker.last_check_time.strftime('%Y-%m-%d %H:%M:%S.%f')
     
-    for test_id, test_link, test_date, group_name, subject_name, teacher_name, change_type in changes:
-        if (test_id, change_type) in tracker.sent_notifications:
-            continue
-            
-        # Получаем студентов группы
+    try:
+        # Получаем изменения тестов
         async with db_connection.execute('''
-            SELECT telegram_id FROM students 
-            WHERE id_group = (SELECT id FROM groups WHERE name_group = ?)
-            AND telegram_id IS NOT NULL
-            AND is_active = 1
-        ''', (group_name,)) as cursor:
+            SELECT t.id, t.test_link, t.date, g.name_group, subj.name, tch.full_name, 
+                CASE 
+                    WHEN t.created_at > ? THEN 'created'
+                    WHEN t.updated_at > ? AND t.updated_at != t.created_at THEN 'updated'
+                    WHEN t.deleted_at > ? THEN 'deleted'
+                END as change_type,
+                MAX(COALESCE(t.created_at, t.updated_at, t.deleted_at)) as change_time
+            FROM tests t
+            JOIN groups g ON t.group_id = g.id
+            JOIN disciplines d ON t.discipline_id = d.id
+            JOIN subjects subj ON d.subject_id = subj.id
+            JOIN teachers tch ON d.teacher_id = tch.id
+            WHERE t.created_at > ? OR (t.updated_at > ? AND t.updated_at != t.created_at) OR t.deleted_at > ?
+            GROUP BY t.id, change_type
+        ''', (last_check_str,) * 6) as cursor:
+            changes = await cursor.fetchall()
+        
+        logger.debug(f"Found {len(changes)} test changes since {last_check_str}")
+        
+        if not changes:
+            return
+        
+        # Группируем по группе для batch-обработки
+        changes_by_group: Dict[str, List] = {}
+        for row in changes:
+            group_name = row[3]
+            if group_name not in changes_by_group:
+                changes_by_group[group_name] = []
+            changes_by_group[group_name].append(row)
+        
+        # Получаем всех студентов для групп с изменениями
+        group_placeholders = ','.join(['?'] * len(changes_by_group))
+        async with db_connection.execute(f'''
+            SELECT s.telegram_id, g.name_group 
+            FROM students s
+            JOIN groups g ON s.id_group = g.id
+            WHERE g.name_group IN ({group_placeholders})
+            AND s.telegram_id IS NOT NULL
+            AND s.is_active = 1
+        ''', list(changes_by_group.keys())) as cursor:
             students = await cursor.fetchall()
         
-        # Формируем сообщение в зависимости от типа изменения
-        if change_type == 'created':
-            message = (f"📌 <b>Добавлен новый тест!</b>\n\n"
-                      f"📚 Предмет: {subject_name}\n"
-                      f"👨‍🏫 Преподаватель: {teacher_name}\n"
-                      f"👥 Группа: {group_name}\n"
-                      f"📅 Дата: {test_date}\n"
-                      f"🔗 Ссылка: <a href='{test_link}'>Перейти к тесту</a>")
-        elif change_type == 'updated':
-            message = (f"🔄 <b>Изменен тест!</b>\n\n"
-                      f"📚 Предмет: {subject_name}\n"
-                      f"👨‍🏫 Преподаватель: {teacher_name}\n"
-                      f"👥 Группа: {group_name}\n"
-                      f"📅 Новая дата: {test_date}\n"
-                      f"🔗 Ссылка: <a href='{test_link}'>Перейти к тесту</a>")
-        elif change_type == 'deleted':
-            message = (f"❌ <b>Тест отменен!</b>\n\n"
-                      f"📚 Предмет: {subject_name}\n"
-                      f"👨‍🏫 Преподаватель: {teacher_name}\n"
-                      f"👥 Группа: {group_name}\n"
-                      f"📅 Дата: {test_date}")
+        # Создаем mapping группа -> список telegram_id
+        group_to_students: Dict[str, List[int]] = {}
+        for telegram_id, group_name in students:
+            if group_name not in group_to_students:
+                group_to_students[group_name] = []
+            group_to_students[group_name].append(telegram_id)
         
         # Отправляем уведомления
-        for (telegram_id,) in students:
+        tasks = []
+        for group_name, group_changes in changes_by_group.items():
+            if group_name not in group_to_students:
+                continue
+                
+            for change in group_changes:
+                test_id, test_link, test_date, _, subject_name, teacher_name, change_type, change_time = change
+                
+                notification_key = (test_id, change_type, datetime.strptime(change_time, '%Y-%m-%d %H:%M:%S.%f'))
+                if notification_key in tracker.sent_notifications:
+                    continue
+                
+                # Формируем сообщение
+                if change_type == 'created':
+                    message = (f"📌 <b>Добавлен новый тест!</b>\n\n"
+                              f"📚 Предмет: {subject_name}\n"
+                              f"👨‍🏫 Преподаватель: {teacher_name}\n"
+                              f"👥 Группа: {group_name}\n"
+                              f"📅 Дата: {test_date}\n"
+                              f"🔗 Ссылка: <a href='{test_link}'>Перейти к тесту</a>")
+                elif change_type == 'updated':
+                    message = (f"🔄 <b>Изменен тест!</b>\n\n"
+                              f"📚 Предмет: {subject_name}\n"
+                              f"👨‍🏫 Преподаватель: {teacher_name}\n"
+                              f"👥 Группа: {group_name}\n"
+                              f"📅 Новая дата: {test_date}\n"
+                              f"🔗 Ссылка: <a href='{test_link}'>Перейти к тесту</a>")
+                elif change_type == 'deleted':
+                    message = (f"❌ <b>Тест отменен!</b>\n\n"
+                              f"📚 Предмет: {subject_name}\n"
+                              f"👨‍🏫 Преподаватель: {teacher_name}\n"
+                              f"👥 Группа: {group_name}\n"
+                              f"📅 Дата: {test_date}")
+                
+                # Добавляем задачи на отправку
+                for telegram_id in group_to_students[group_name]:
+                    tasks.append(
+                        send_notification_with_retry(
+                            bot=bot,
+                            chat_id=telegram_id,
+                            text=message,
+                            semaphore=semaphore,
+                            notification_key=notification_key,
+                            tracker=tracker
+                        )
+                    )
+        
+        # Выполняем все задачи параллельно
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Обрабатываем результаты
+        successful = 0
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Error sending test notification: {result}")
+            else:
+                successful += 1
+        
+        logger.info(f"Sent {successful} test notifications in {time.time() - start_time:.2f}s")
+        
+    except Exception as e:
+        logger.error(f"Error in check_test_changes: {e}")
+        raise
+
+async def check_debt_changes(
+    db_connection: aiosqlite.Connection, 
+    bot: Bot, 
+    tracker: ChangeTracker,
+    semaphore: asyncio.Semaphore
+):
+    """Проверка изменений в долгах"""
+    start_time = time.time()
+    last_check_str = tracker.last_check_time.strftime('%Y-%m-%d %H:%M:%S.%f')
+    
+    try:
+        # Получаем изменения долгов
+        async with db_connection.execute('''
+            SELECT sd.student_id, sd.discipline_id, sd.debt_type_id, 
+                   subj.name, dt.name, sd.last_date,
+                   CASE 
+                       WHEN sd.created_at > ? THEN 'created'
+                       WHEN sd.updated_at > ? AND sd.updated_at != sd.created_at THEN 'updated'
+                       WHEN sd.deleted_at > ? THEN 'deleted'
+                   END as change_type,
+                   MAX(COALESCE(sd.created_at, sd.updated_at, sd.deleted_at)) as change_time
+            FROM student_debts sd
+            JOIN disciplines d ON sd.discipline_id = d.id
+            JOIN subjects subj ON d.subject_id = subj.id
+            JOIN debt_types dt ON sd.debt_type_id = dt.id
+            WHERE sd.created_at > ? OR (sd.updated_at > ? AND sd.updated_at != sd.created_at) OR sd.deleted_at > ?
+            GROUP BY sd.student_id, sd.discipline_id, sd.debt_type_id, change_type
+        ''', (last_check_str,) * 6) as cursor:
+            changes = await cursor.fetchall()
+        
+        logger.debug(f"Found {len(changes)} debt changes since {last_check_str}")
+        
+        if not changes:
+            return
+        
+        # Группируем по студентам
+        debts_by_student: Dict[int, List] = {}
+        for row in changes:
+            student_id = row[0]
+            if student_id not in debts_by_student:
+                debts_by_student[student_id] = []
+            debts_by_student[student_id].append(row)
+        
+        # Получаем telegram_id для студентов с изменениями
+        student_placeholders = ','.join(['?'] * len(debts_by_student))
+        async with db_connection.execute(f'''
+            SELECT id_student, telegram_id FROM students 
+            WHERE id_student IN ({student_placeholders})
+            AND telegram_id IS NOT NULL
+            AND is_active = 1
+        ''', list(debts_by_student.keys())) as cursor:
+            students = await cursor.fetchall()
+        
+        # Отправляем уведомления
+        tasks = []
+        for student_id, telegram_id in students:
+            if student_id not in debts_by_student:
+                continue
+                
+            debts = debts_by_student[student_id]
+            messages = []
+            
+            for debt in debts:
+                _, _, _, subject_name, debt_type, last_date, change_type, change_time = debt
+                
+                notification_key = (student_id, debt[1], debt[2], change_type, 
+                                  datetime.strptime(change_time, '%Y-%m-%d %H:%M:%S.%f'))
+                if notification_key in tracker.sent_notifications:
+                    continue
+                
+                if change_type == 'created':
+                    messages.append(
+                        f"➕ Добавлен долг:\n"
+                        f"📚 {subject_name}\n"
+                        f"🔴 {debt_type}\n"
+                        f"⏳ Сдать до: {last_date}\n"
+                    )
+                elif change_type == 'updated':
+                    messages.append(
+                        f"🔄 Изменен долг:\n"
+                        f"📚 {subject_name}\n"
+                        f"🔴 {debt_type}\n"
+                        f"⏳ Новый срок: {last_date}\n"
+                    )
+                elif change_type == 'deleted':
+                    messages.append(
+                        f"❌ Снят долг:\n"
+                        f"📚 {subject_name}\n"
+                        f"🔴 {debt_type}\n"
+                    )
+            
+            if not messages:
+                continue
+                
+            full_message = "📢 <b>Изменения в ваших долгах:</b>\n\n" + "\n".join(messages)
+            
+            tasks.append(
+                send_notification_with_retry(
+                    bot=bot,
+                    chat_id=telegram_id,
+                    text=full_message,
+                    semaphore=semaphore,
+                    notification_key=notification_key,
+                    tracker=tracker
+                )
+            )
+        
+        # Выполняем все задачи параллельно
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Обрабатываем результаты
+        successful = 0
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Error sending debt notification: {result}")
+            else:
+                successful += 1
+        
+        logger.info(f"Sent {successful} debt notifications in {time.time() - start_time:.2f}s")
+        
+    except Exception as e:
+        logger.error(f"Error in check_debt_changes: {e}")
+        raise
+
+async def send_notification_with_retry(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    semaphore: asyncio.Semaphore,
+    notification_key: Tuple,
+    tracker: ChangeTracker,
+    max_retries: int = 3
+):
+    """Отправка уведомления с повторными попытками"""
+    async with semaphore:
+        for attempt in range(max_retries):
             try:
                 await bot.send_message(
-                    chat_id=telegram_id,
-                    text=message,
+                    chat_id=chat_id,
+                    text=text,
                     parse_mode='HTML'
                 )
-                tracker.sent_notifications.add((test_id, change_type))
+                tracker.sent_notifications.add(notification_key)
+                return True
             except Exception as e:
-                logger.error(f"Ошибка отправки уведомления о тесте: {e}")
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(1 * (attempt + 1))
+    return False
 
-async def check_debt_changes(db_connection: aiosqlite.Connection, bot: Bot, tracker: ChangeTracker):
-    # Получаем все изменения долгов после последней проверки
-    async with db_connection.execute('''
-        SELECT sd.student_id, sd.discipline_id, sd.debt_type_id, 
-               subj.name, dt.name, sd.last_date,
-               CASE 
-                   WHEN sd.created_at > ? THEN 'created'
-                   WHEN sd.updated_at > ? THEN 'updated'
-                   WHEN sd.deleted_at > ? THEN 'deleted'
-               END as change_type
-        FROM student_debts sd
-        JOIN disciplines d ON sd.discipline_id = d.id
-        JOIN subjects subj ON d.subject_id = subj.id
-        JOIN debt_types dt ON sd.debt_type_id = dt.id
-        WHERE sd.created_at > ? OR sd.updated_at > ? OR sd.deleted_at > ?
-    ''', (tracker.last_check_time,) * 6) as cursor:
-        changes = await cursor.fetchall()
-    
-    # Группируем по студентам
-    debts_by_student: Dict[int, List[Tuple]] = {}
-    for change in changes:
-        student_id = change[0]
-        if student_id not in debts_by_student:
-            debts_by_student[student_id] = []
-        debts_by_student[student_id].append(change)
-    
-    # Отправляем уведомления
-    for student_id, debts in debts_by_student.items():
-        # Получаем telegram_id студента
-        async with db_connection.execute('''
-            SELECT telegram_id FROM students 
-            WHERE id_student = ? AND is_active = 1 AND telegram_id IS NOT NULL
-        ''', (student_id,)) as cursor:
-            student = await cursor.fetchone()
-        
-        if not student:
-            continue
-            
-        telegram_id = student[0]
-        
-        # Формируем сообщение
-        message = "📢 <b>Изменения в ваших долгах:</b>\n\n"
-        for debt in debts:
-            _, _, _, subject_name, debt_type, last_date, change_type = debt
-            
-            if change_type == 'created':
-                message += (f"➕ Добавлен долг:\n"
-                          f"📚 {subject_name}\n"
-                          f"🔴 {debt_type}\n"
-                          f"⏳ Сдать до: {last_date}\n\n")
-            elif change_type == 'updated':
-                message += (f"🔄 Изменен долг:\n"
-                          f"📚 {subject_name}\n"
-                          f"🔴 {debt_type}\n"
-                          f"⏳ Новый срок: {last_date}\n\n")
-            elif change_type == 'deleted':
-                message += (f"❌ Снят долг:\n"
-                          f"📚 {subject_name}\n"
-                          f"🔴 {debt_type}\n\n")
-        
-        try:
-            await bot.send_message(
-                chat_id=telegram_id,
-                text=message,
-                parse_mode='HTML'
-            )
-            # Помечаем как отправленные
-            for debt in debts:
-                tracker.sent_notifications.add((student_id, debt[1], debt[2], debt[6]))
-        except Exception as e:
-            logger.error(f"Ошибка отправки уведомления о долге: {e}")
 
 class FileWatcher:
     def __init__(self):
@@ -240,9 +398,9 @@ async def notify_users(bot: Bot):
     file_watcher = FileWatcher()
     
    # Уменьшите задержки
-    BATCH_SIZE = 50  # Увеличьте размер батча
-    DELAY_BETWEEN_BATCHES = 0.3  # Уменьшите задержку между батчами
-    DELAY_BETWEEN_MESSAGES = 0.05  # Уменьшите задержку внутри батча
+    BATCH_SIZE = 100  # Увеличьте размер батча
+    DELAY_BETWEEN_BATCHES = 0.1  # Уменьшите задержку между батчами
+    DELAY_BETWEEN_MESSAGES = 0.01  # Уменьшите задержку внутри батча
     
     schedule_files = [
         "Расписание_групп.xlsx",

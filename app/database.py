@@ -1,5 +1,8 @@
 import sqlite3
+import logging
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 class StudentBotDB:
     def __init__(self, db_name: str = 'student_bot.db'):
@@ -120,17 +123,20 @@ class StudentBotDB:
             'CREATE INDEX IF NOT EXISTS idx_students_telegram ON students(telegram_id)',
             'CREATE INDEX IF NOT EXISTS idx_students_active ON students(is_active)',
             'CREATE INDEX IF NOT EXISTS idx_students_group ON students(id_group)',
-            
+            'CREATE INDEX IF NOT EXISTS idx_students_telegram_active ON students(telegram_id, is_active)',
+
             # Индексы для таблицы tests
             'CREATE INDEX IF NOT EXISTS idx_tests_date ON tests(date)',
             'CREATE INDEX IF NOT EXISTS idx_tests_group ON tests(group_id)',
             'CREATE INDEX IF NOT EXISTS idx_tests_discipline ON tests(discipline_id)',
-            
+            'CREATE INDEX IF NOT EXISTS idx_tests_timestamps ON tests(created_at, updated_at, deleted_at)',
+
             # Индексы для таблицы student_debts
             'CREATE INDEX IF NOT EXISTS idx_debts_date ON student_debts(last_date)',
             'CREATE INDEX IF NOT EXISTS idx_debts_student ON student_debts(student_id)',
             'CREATE INDEX IF NOT EXISTS idx_debts_discipline ON student_debts(discipline_id)',
-            
+            'CREATE INDEX IF NOT EXISTS idx_debts_timestamps ON student_debts(created_at, updated_at, deleted_at)',
+
             # Индексы для таблицы sent_notifications
             'CREATE INDEX IF NOT EXISTS idx_sent_notifications_user ON sent_notifications(user_id)',
             'CREATE INDEX IF NOT EXISTS idx_sent_notifications_type ON sent_notifications(notification_type, entity_id)',
@@ -142,13 +148,14 @@ class StudentBotDB:
             'CREATE INDEX IF NOT EXISTS idx_disciplines_group ON disciplines(group_id)'
         ]
 
-        # Триггеры для обновления временных меток
+        # In database.py, update the trigger definitions:
+
         trigger_queries = [
             '''CREATE TRIGGER IF NOT EXISTS update_test_timestamp
             AFTER UPDATE ON tests
             FOR EACH ROW
             BEGIN
-                UPDATE tests SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+                UPDATE tests SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
             END;''',
             
             '''CREATE TRIGGER IF NOT EXISTS update_debt_timestamp
@@ -157,9 +164,9 @@ class StudentBotDB:
             BEGIN
                 UPDATE student_debts 
                 SET updated_at = CURRENT_TIMESTAMP 
-                WHERE student_id = OLD.student_id 
-                AND discipline_id = OLD.discipline_id 
-                AND debt_type_id = OLD.debt_type_id;
+                WHERE student_id = NEW.student_id 
+                AND discipline_id = NEW.discipline_id 
+                AND debt_type_id = NEW.debt_type_id;
             END;'''
         ]
 
@@ -172,15 +179,14 @@ class StudentBotDB:
             try:
                 self._execute(query, commit=True)
             except Exception as e:
-                print(f"Ошибка при создании индекса: {e}")
+                logger.error(f"Ошибка при создании индекса: {e}")
         
         # Создаем триггеры
         for query in trigger_queries:
             try:
                 self._execute(query, commit=True)
             except Exception as e:
-                print(f"Ошибка при создании триггера: {e}")
+                logger.error(f"Ошибка при создании триггера: {e}")
 
 if __name__ == "__main__":
     db = StudentBotDB()
-    print("База данных и индексы успешно созданы")

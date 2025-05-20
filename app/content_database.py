@@ -252,53 +252,6 @@ async def populate_database():
             VALUES (?, ?, ?)
         ''', discipline)
 
-   
-    # Заполнение новостей
-    news_data = [
-        ('Отмена занятий', 'В связи с отключением электричества занятия отменены с 11:40', 
-         (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'), '7к', 0, 1),
-        ('Собрание старост', 'Собрание старост в 15:00', 
-         datetime.now().strftime('%Y-%m-%d'), '7а-203', 0, 0),
-         ('Собрание группы', 'Собрание группы по поводу практики ', 
-         datetime.now().strftime('%Y-%m-%d'), '7а-203', 1, 0),
-    ]
-    for news in news_data:
-        cur.execute('''
-            INSERT INTO news (title, description, date, place, for_all_groups, is_published)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', news)
-
-    # Связи новостей и групп (для новостей не для всех)
-    news_groups = [(3, 1)]  # Собрание старост только для 21ВВС1 и 21ВА1
-    for ng in news_groups:
-        cur.execute('INSERT INTO news_groups (news_id, group_id) VALUES (?, ?)', ng)
-    
-        # Заполнение тестов
-    tests_data = [
-        (1, 5, 'https://test.com', (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d')),
-        (2, 1, 'https://test.com', (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')),
-
-    ]
-    for test in tests_data:
-        cur.execute('''
-            INSERT INTO tests (group_id, discipline_id, test_link, date)
-            VALUES (?, ?, ?, ?)
-        ''', test)
-
-        # Задолженности студентов
-    student_debts_data = [
-        (2, 48, 1, (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d')),  
-        (2, 48, 2, (datetime.now() + timedelta(days=21)).strftime('%Y-%m-%d')),  
-        (3, 24, 4, (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')),   
-        (4, 50, 3, (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d'))   
-    ]
-    for debt in student_debts_data:
-        cur.execute('''
-            INSERT INTO student_debts (student_id, discipline_id, debt_type_id, last_date)
-            VALUES (?, ?, ?, ?)
-        ''', debt)
-
-
     conn.commit()
     conn.close()
 
